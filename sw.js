@@ -1,4 +1,4 @@
-const CACHE='pdfabby-v1';
+const CACHE='pdfabby-v2';
 const FILES=['./index.html','./app.js','./pdf-lib.js','./pdf.js','./tesseract.js','./manifest.json'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)));
@@ -9,5 +9,11 @@ self.addEventListener('activate',e=>{
   self.clients.claim();
 });
 self.addEventListener('fetch',e=>{
-  e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)).catch(()=>caches.match('./index.html')));
+  e.respondWith(
+    fetch(e.request).then(r=>{
+      const copy=r.clone();
+      caches.open(CACHE).then(c=>c.put(e.request,copy));
+      return r;
+    }).catch(()=>caches.match(e.request).then(r=>r||caches.match('./index.html')))
+  );
 });
