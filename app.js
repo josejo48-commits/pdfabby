@@ -129,6 +129,7 @@ async function rerenderPage(i){
   await pg.render({canvasContext:ctx,viewport:vp}).promise;
   const scv=document.querySelector('#si'+i+' canvas');
   if(scv){scv.width=vp.width;scv.height=vp.height;scv.getContext('2d').drawImage(cv,0,0);}
+  textItems=[]; // reset text cache after rerender
 }
 
 function highlightActive(){
@@ -157,7 +158,7 @@ function getTouchCoords(e,i){
 
 function onDown(e,i){
   if(e.button!==0)return;
-  if(curTool==='select'){curPage=i;highlightActive();return;}
+  if(curTool==='select'){curPage=i;highlightActive();handleTextClick(e,i);return;}
   if(curTool==='addtext'||curTool==='edittext'){curPage=i;return;}
   curPage=i;drawing=true;drawStart=getCoords(e,i);e.preventDefault();
 }
@@ -191,7 +192,7 @@ async function onUp(e,i){
 }
 function onTouchStart(e,i){
   const t=e.touches[0];
-  if(curTool==='select'){curPage=i;highlightActive();return;}
+  if(curTool==='select'){curPage=i;highlightActive();handleTextClick(e,i);return;}
   if(curTool==='addtext'||curTool==='edittext'){curPage=i;return;}
   curPage=i;drawing=true;drawStart=getTouchCoords(e,i);e.preventDefault();
 }
