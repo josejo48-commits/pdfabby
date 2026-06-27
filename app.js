@@ -158,7 +158,7 @@ function getTouchCoords(e,i){
 
 function onDown(e,i){
   if(e.button!==0)return;
-  if(curTool==='select'){curPage=i;highlightActive();handleTextClick(e,i);return;}
+  if(curTool==='select'){curPage=i;highlightActive();return;}
   if(curTool==='addtext'||curTool==='edittext'){curPage=i;return;}
   curPage=i;drawing=true;drawStart=getCoords(e,i);e.preventDefault();
 }
@@ -176,6 +176,10 @@ function onMove(e,i){
 }
 async function onUp(e,i){
   const c=getCoords(e,i);
+  if(curTool==='select'){
+    await handleTextClick(e,i);
+    return;
+  }
   if(curTool==='addtext'||curTool==='edittext'){pendingCoords=c;pendingPage=i;openTextEdit();return;}
   if(!drawing)return;drawing=false;
   const db=$('db'+i);if(db)db.style.display='none';
@@ -192,7 +196,7 @@ async function onUp(e,i){
 }
 function onTouchStart(e,i){
   const t=e.touches[0];
-  if(curTool==='select'){curPage=i;highlightActive();handleTextClick(e,i);return;}
+  if(curTool==='select'){curPage=i;highlightActive();return;}
   if(curTool==='addtext'||curTool==='edittext'){curPage=i;return;}
   curPage=i;drawing=true;drawStart=getTouchCoords(e,i);e.preventDefault();
 }
@@ -211,6 +215,10 @@ function onTouchMove(e,i){
 }
 async function onTouchEnd(e,i){
   const c=getTouchCoords(e,i);
+  if(curTool==='select'){
+    await handleTextClick(e,i);
+    return;
+  }
   if(curTool==='addtext'||curTool==='edittext'){pendingCoords=c;pendingPage=i;openTextEdit();return;}
   if(!drawing)return;drawing=false;
   const db=$('db'+i);if(db)db.style.display='none';
