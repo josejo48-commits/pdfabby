@@ -202,8 +202,8 @@ async function onUp(e,i){
   if(!drawing)return; drawing=false;
   const db=$('db'+i); if(db)db.style.display='none';
   if(curTool==='replace'){
-    pendingReplace={x0:Math.min(drawStart.pdfX,c.pdfX),y0:Math.min(drawStart.pdfY,c.pdfY),x1:Math.max(drawStart.pdfX,c.pdfX),y1:Math.max(drawStart.pdfY,c.pdfY)};
-    pendingPage=i; openReplaceModal(); return;
+    const area={x0:Math.min(drawStart.pdfX,c.pdfX),y0:Math.min(drawStart.pdfY,c.pdfY),x1:Math.max(drawStart.pdfX,c.pdfX),y1:Math.max(drawStart.pdfY,c.pdfY)};
+    startReplaceArea(i,area); return;
   }
   if(curTool==='rect')await doRect(i,drawStart,c);
   else if(curTool==='erase')await doErase(i,drawStart,c);
@@ -223,8 +223,8 @@ async function onTouchEnd(e,i){
   if(!drawing)return; drawing=false;
   const db=$('db'+i); if(db)db.style.display='none';
   if(curTool==='replace'){
-    pendingReplace={x0:Math.min(drawStart.pdfX,c.pdfX),y0:Math.min(drawStart.pdfY,c.pdfY),x1:Math.max(drawStart.pdfX,c.pdfX),y1:Math.max(drawStart.pdfY,c.pdfY)};
-    pendingPage=i; openReplaceModal(); return;
+    const area={x0:Math.min(drawStart.pdfX,c.pdfX),y0:Math.min(drawStart.pdfY,c.pdfY),x1:Math.max(drawStart.pdfX,c.pdfX),y1:Math.max(drawStart.pdfY,c.pdfY)};
+    startReplaceArea(i,area); return;
   }
   if(curTool==='rect')await doRect(i,drawStart,c);
   else if(curTool==='erase')await doErase(i,drawStart,c);
@@ -475,7 +475,50 @@ async function applyTextEdit(){
 
 // ── Modal reemplazar texto ────────────────────────────
 function setRtStyle(s){rtStyle=s;['normal','bold','italic'].forEach(k=>$('rt-sty-'+k).classList.toggle('on',k===s));}
-function openReplaceModal(){$('replace-modal').classList.add('show');$('ovbg').classList.add('show');$('rt-text').value='';setTimeout(()=>$('rt-text').focus(),80);}
+function startReplaceArea(i,area){
+  pendingReplace=area; pendingPage=i; openReplaceModal();
+  prefillReplaceFromOCR(i,area);
+}
+async function prefillReplaceFromOCR(pageIdx,area){
+  try{
+    const OCR_SCALE=4;
+    const b=await pdfLibDoc.save();
+    const pjs=await pdfjsLib.getDocument({data:b.slice()}).promise;
+    const pg=await pjs.getPage(pageIdx+1);
+    const vp=pg.getViewport({scale:OCR_SCALE});
+    const full=document.createElement('canvas');
+    full.width=vp.width; full.height=vp.height;
+    const fctx=full.getContext('2d');
+    fctx.fillStyle='#fff'; fctx.fillRect(0,0,full.width,full.height);
+    await pg.render({canvasContext:fctx,viewport:vp}).promise;
+    const {width:pw,height:ph}=pdfLibDoc.getPage(pageIdx).getSize();
+    const sx=full.width/pw, sy=full.height/ph, pad=6;
+    const cx0=Math.max(0,area.x0*sx-pad);
+    const cx1=Math.min(full.width,area.x1*sx+pad);
+    const cy0=Math.max(0,full.height-area.y1*sy-pad);
+    const cy1=Math.min(full.height,full.height-area.y0*sy+pad);
+    const cw=cx1-cx0, ch=cy1-cy0;
+    if(cw<6||ch<6)return;
+    const crop=document.createElement('canvas');
+    crop.width=cw; crop.height=ch;
+    crop.getContext('2d').drawImage(full,cx0,cy0,cw,ch,0,0,cw,ch);
+    const result=await Tesseract.recognize(crop,'spa+eng');
+    const txt=(result.data.text||'').replace(/\s+/g,' ').trim();
+    const stillRelevant=pendingReplace===area&&$('replace-modal').classList.contains('show');
+    if(stillRelevant){
+      if(txt&&!$('rt-text').value) $('rt-text').value=txt;
+      $('rt-text').placeholder='Escribe el texto de reemplazo...';
+    }
+  }catch(err){
+    if(pendingReplace===area) $('rt-text').placeholder='Escribe el texto de reemplazo...';
+  }
+}
+function openReplaceModal(){
+  $('replace-modal').classList.add('show');$('ovbg').classList.add('show');
+  $('rt-text').value='';
+  $('rt-text').placeholder='Leyendo zona...';
+  setTimeout(()=>$('rt-text').focus(),80);
+}
 function closeReplaceModal(){$('replace-modal').classList.remove('show');$('ovbg').classList.remove('show');pendingReplace=null;pendingPage=null;}
 async function applyReplace(){
   const txt=$('rt-text').value.trim(); if(!txt){closeReplaceModal();return;}
