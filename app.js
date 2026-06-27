@@ -261,13 +261,54 @@ async function handleTextClick(e,i){
     }
     hideLoad();
     if(!allText.length){
-      setMsg('Este PDF no tiene texto editable (es una imagen)');
+      const ok=await showConfirm('Este PDF no tiene texto nativo (es una imagen).\n\u00bfReconocer texto con OCR? Puede tardar unos segundos.');
+      if(ok) await runOCR(i);
       return;
     }
     showTextPicker(i);
   }catch(err){
     hideLoad();
     setMsg('Error: '+err.message);
+  }
+}
+
+async function runOCR(pageIdx){
+  showLoad('Reconociendo texto (OCR)... puede tardar');
+  try{
+    const cv=document.querySelector('#pw'+pageIdx+' canvas');
+    if(!cv) throw new Error('No se encontr\u00f3 la p\u00e1gina');
+    const result=await Tesseract.recognize(cv,'spa+eng',{
+      logger:m=>{
+        if(m.status==='recognizing text'){
+          showLoad('Reconociendo texto... '+Math.round((m.progress||0)*100)+'%');
+        }
+      }
+    });
+    const {width:pw,height:ph}=pdfLibDoc.getPage(pageIdx).getSize();
+    const sx=pw/cv.width, sy=ph/cv.height;
+    const words=(result.data.words||[])
+      .filter(w=>w.text&&w.text.trim().length>0&&(w.confidence==null||w.confidence>35));
+    allText=words.map(w=>{
+      const h=(w.bbox.y1-w.bbox.y0)*sy;
+      return {
+        str:w.text.trim(),
+        pdfX:w.bbox.x0*sx,
+        pdfY:ph-(w.bbox.y1*sy),
+        pdfW:(w.bbox.x1-w.bbox.x0)*sx,
+        pdfH:h, fontSize:h,
+        bold:false, isOCR:true
+      };
+    });
+    allTextLoaded=true;
+    hideLoad();
+    if(!allText.length){
+      setMsg('OCR no encontr\u00f3 texto reconocible en esta p\u00e1gina');
+      return;
+    }
+    showTextPicker(pageIdx);
+  }catch(err){
+    hideLoad();
+    setMsg('Error OCR: '+err.message);
   }
 }
 
