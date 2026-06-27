@@ -113,6 +113,145 @@ async function handleTextClick(e,pageIdx){
 }
 
 
+// ── Editar texto existente ────────────────────────────
+let allTextItems=[], allTextLoaded=false;
+
+async function loadAllText(pageIdx){
+  if(allTextLoaded) return;
+  const b=await pdfLibDoc.save();
+  const pjs=await pdfjsLib.getDocument({data:b.slice()}).promise;
+  const pg=await pjs.getPage(pageIdx+1);
+  const content=await pg.getTextContent();
+  const {width:pw,height:ph}=pdfLibDoc.getPage(pageIdx).getSize();
+  allTextItems=content.items
+    .filter(it=>it.str&&it.str.trim().length>0)
+    .map(it=>{
+      const t=it.transform;
+      return {
+        str:it.str.trim(),
+        pdfX:t[4], pdfY:t[5],
+        fontSize:Math.abs(t[3]),
+        pdfW:it.width||Math.abs(t[3])*it.str.length*0.55,
+        pdfH:Math.abs(t[3]),
+        bold:it.fontName&&it.fontName.toLowerCase().includes('bold')
+      };
+    });
+  allTextLoaded=true;
+}
+
+async function handleTextClick(e, pageIdx){
+  if(curTool!=='select') return;
+  showLoad('Cargando texto...');
+  await loadAllText(pageIdx);
+  hideLoad();
+  if(!allTextItems.length){
+    setMsg('Este PDF no tiene texto editable');
+    return;
+  }
+  showTextPicker(pageIdx);
+}
+
+
+function closeTextPicker(){
+  var m=document.getElementById('text-picker');if(m)m.remove();
+  var b=document.getElementById('tp-bg');if(b)b.remove();
+}
+function showTextPicker(pageIdx){
+  const ex=document.getElementById('text-picker');if(ex)ex.remove();
+
+  const modal=document.createElement('div');
+  modal.id='text-picker';
+  modal.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);'+
+    'background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(99,102,241,.3);'+
+    'padding:20px;width:420px;max-width:95vw;z-index:500;border:2px solid #e0e7ff;'+
+    'max-height:80vh;display:flex;flex-direction:column;';
+
+  modal.innerHTML=
+    '<h3 style="font-size:14px;font-weight:900;color:#4f46e5;margin-bottom:10px">'+
+    '✏️ ¿Qué texto quieres editar?</h3>'+
+    '<input id="tp-search" type="text" placeholder="Buscar texto..." '+
+    'style="width:100%;padding:8px 10px;border:1.5px solid #e0e7ff;border-radius:8px;'+
+    'font-size:13px;font-weight:600;outline:none;margin-bottom:10px;box-sizing:border-box">'+
+    '<div id="tp-list" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:4px;max-height:50vh"></div>'+
+    '<button onclick="closeTextPicker()" '+
+    'style="margin-top:10px;padding:8px;border-radius:8px;border:1.5px solid #e0e7ff;'+
+    'background:#fafafe;color:#6b7280;font-size:13px;font-weight:700;cursor:pointer;width:100%">'+
+    'Cancelar</button>';
+
+  document.body.appendChild(modal);
+
+  const ovbg2=document.createElement('div');
+  ovbg2.id='tp-bg';
+  ovbg2.style.cssText='position:fixed;inset:0;background:rgba(30,27,75,.3);z-index:499;backdrop-filter:blur(2px)';
+  ovbg2.onclick=()=>{modal.remove();ovbg2.remove();};
+  document.body.insertBefore(ovbg2,modal);
+
+  const list=document.getElementById('tp-list');
+  const search=document.getElementById('tp-search');
+
+  function renderList(filter=''){
+    list.innerHTML='';
+    const items=allTextItems.filter(t=>
+      !filter||t.str.toLowerCase().includes(filter.toLowerCase())
+    );
+    if(!items.length){
+      list.innerHTML='<div style="text-align:center;color:#94a3b8;padding:20px;font-size:13px">No encontrado</div>';
+      return;
+    }
+    items.forEach(item=>{
+      const row=document.createElement('div');
+      row.style.cssText='padding:8px 12px;border-radius:8px;border:1.5px solid #e0e7ff;'+
+        'cursor:pointer;font-size:13px;font-weight:'+(item.bold?'700':'500')+';'+
+        'color:#1e1b4b;background:#fafafe;transition:.12s;';
+      row.textContent=item.str;
+      row.addEventListener('mouseenter',()=>{row.style.background='#ede9fe';row.style.borderColor='#6366f1';});
+      row.addEventListener('mouseleave',()=>{row.style.background='#fafafe';row.style.borderColor='#e0e7ff';});
+      row.onclick=()=>{
+        modal.remove();ovbg2.remove();
+        openInlineTextEdit(item, pageIdx);
+      };
+      list.appendChild(row);
+    });
+  }
+
+  renderList();
+  search.addEventListener('input',()=>renderList(search.value));
+  search.focus();
+}
+
+async function openInlineTextEdit(item, pageIdx){
+  const newText=prompt('Editar texto:\n\nActual: "'+item.str+'"\n\nNuevo texto:', item.str);
+  if(newText===null||newText===item.str) return;
+
+  showLoad('Aplicando cambio...');
+  await snapshot();
+  try{
+    const page=pdfLibDoc.getPage(pageIdx);
+    const {width:pw}=page.getSize();
+    // Whiteout
+    page.drawRectangle({
+      x:item.pdfX-1, y:item.pdfY-1,
+      width:item.pdfW+2, height:item.pdfH+2,
+      color:PDFLib.rgb(1,1,1), borderWidth:0
+    });
+    // Write new
+    const font=await pdfLibDoc.embedFont(
+      item.bold?PDFLib.StandardFonts.HelveticaBold:PDFLib.StandardFonts.Helvetica
+    );
+    page.drawText(newText.trim(),{
+      x:item.pdfX, y:item.pdfY,
+      size:Math.max(4,item.fontSize),
+      font, color:PDFLib.rgb(0,0,0),
+      maxWidth:pw-item.pdfX-2
+    });
+    allTextLoaded=false; allTextItems=[];
+    await rerenderPage(pageIdx);
+    setMsg('\u2713 "'+item.str+'" → "'+newText+'"');
+  }catch(err){setMsg('Error: '+err.message);}
+  hideLoad();
+}
+
+
 let pendingReplace=null;
 
 const $=id=>document.getElementById(id);
@@ -233,7 +372,7 @@ async function rerenderPage(i){
   await pg.render({canvasContext:ctx,viewport:vp}).promise;
   const scv=document.querySelector('#si'+i+' canvas');
   if(scv){scv.width=vp.width;scv.height=vp.height;scv.getContext('2d').drawImage(cv,0,0);}
-  textItems=[]; lastTextPage=-1; // reset text cache after rerender
+  allTextLoaded=false; allTextItems=[]; // reset text cache after rerender
 }
 
 function highlightActive(){
