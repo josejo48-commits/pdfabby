@@ -407,6 +407,40 @@ function closeEditTextModal(){
   $('ovbg').classList.remove('show');
   pendingEditItem=null; pendingEditPageIdx=null;
 }
+// ── Detecta el color real del papel alrededor de una zona ──
+// (en vez de tapar siempre con blanco puro, que se ve como un parche en escaneos)
+function sampleBackgroundColor(pageIdx,x0,y0,x1,y1){
+  try{
+    const cv=document.querySelector('#pw'+pageIdx+' canvas');
+    if(!cv) return [1,1,1];
+    const {width:pw,height:ph}=pdfLibDoc.getPage(pageIdx).getSize();
+    const sx=cv.width/pw, sy=cv.height/ph;
+    const px0=x0*sx, px1=x1*sx;
+    const py0=cv.height-y1*sy, py1=cv.height-y0*sy;
+    const ctx=cv.getContext('2d');
+    const m=3, W=cv.width, H=cv.height, samples=[];
+    function grab(gx,gy,gw,gh){
+      gx=Math.max(0,Math.floor(gx)); gy=Math.max(0,Math.floor(gy));
+      gw=Math.min(W-gx,Math.ceil(gw)); gh=Math.min(H-gy,Math.ceil(gh));
+      if(gw<=0||gh<=0)return;
+      const d=ctx.getImageData(gx,gy,gw,gh).data;
+      for(let p=0;p<d.length;p+=4){
+        const r=d[p],g=d[p+1],b=d[p+2];
+        if((r+g+b)/3>150) samples.push([r,g,b]); // descarta bordes/l\u00edneas oscuras
+      }
+    }
+    grab(px0,py0-m,px1-px0,m);
+    grab(px0,py1,px1-px0,m);
+    grab(px0-m,py0,m,py1-py0);
+    grab(px1,py0,m,py1-py0);
+    if(!samples.length) return [1,1,1];
+    let r=0,g=0,b=0;
+    for(const s of samples){r+=s[0];g+=s[1];b+=s[2];}
+    const n=samples.length;
+    return [r/n/255,g/n/255,b/n/255];
+  }catch(err){ return [1,1,1]; }
+}
+
 async function applyEditText(){
   const item=pendingEditItem, pageIdx=pendingEditPageIdx;
   if(!item){closeEditTextModal();return;}
@@ -418,11 +452,12 @@ async function applyEditText(){
   try{
     const page=pdfLibDoc.getPage(pageIdx);
     const {width:pw}=page.getSize();
-    // Borrar texto original
+    // Borrar texto original (con el color real del papel, no blanco puro)
+    const [br,bg,bb]=sampleBackgroundColor(pageIdx,item.pdfX-1,item.pdfY-1,item.pdfX+item.pdfW+1,item.pdfY+item.pdfH+1);
     page.drawRectangle({
       x:item.pdfX-1, y:item.pdfY-1,
       width:item.pdfW+2, height:item.pdfH+2,
-      color:PDFLib.rgb(1,1,1), borderWidth:0
+      color:PDFLib.rgb(br,bg,bb), borderWidth:0
     });
     // Escribir nuevo
     const font=await pdfLibDoc.embedFont(
@@ -530,7 +565,8 @@ async function applyReplace(){
   try{
     const page=pdfLibDoc.getPage(i);
     const areaW=area.x1-area.x0, areaH=area.y1-area.y0;
-    page.drawRectangle({x:area.x0-1,y:area.y0-1,width:areaW+2,height:areaH+2,color:PDFLib.rgb(1,1,1),borderWidth:0});
+    const [br,bg,bb]=sampleBackgroundColor(i,area.x0-1,area.y0-1,area.x1+1,area.y1+1);
+    page.drawRectangle({x:area.x0-1,y:area.y0-1,width:areaW+2,height:areaH+2,color:PDFLib.rgb(br,bg,bb),borderWidth:0});
     const fonts={bold:PDFLib.StandardFonts.HelveticaBold,italic:PDFLib.StandardFonts.HelveticaOblique,normal:PDFLib.StandardFonts.Helvetica};
     const font=await pdfLibDoc.embedFont(fonts[rtStyle]||fonts.normal);
     const fontSize=sz>0?sz:Math.max(6,Math.min(areaH*0.75,72));
