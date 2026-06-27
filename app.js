@@ -273,10 +273,20 @@ async function handleTextClick(e,i){
 }
 
 async function runOCR(pageIdx){
-  showLoad('Reconociendo texto (OCR)... puede tardar');
+  showLoad('Preparando imagen en alta resoluci\u00f3n...');
   try{
-    const cv=document.querySelector('#pw'+pageIdx+' canvas');
-    if(!cv) throw new Error('No se encontr\u00f3 la p\u00e1gina');
+    const OCR_SCALE=4; // ~288 DPI: mucho m\u00e1s preciso que la vista en pantalla
+    const b=await pdfLibDoc.save();
+    const pjs=await pdfjsLib.getDocument({data:b.slice()}).promise;
+    const pg=await pjs.getPage(pageIdx+1);
+    const vp=pg.getViewport({scale:OCR_SCALE});
+    const cv=document.createElement('canvas');
+    cv.width=vp.width; cv.height=vp.height;
+    const ctx=cv.getContext('2d');
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+    await pg.render({canvasContext:ctx,viewport:vp}).promise;
+
+    showLoad('Reconociendo texto (OCR)... puede tardar');
     const result=await Tesseract.recognize(cv,'spa+eng',{
       logger:m=>{
         if(m.status==='recognizing text'){
@@ -287,7 +297,7 @@ async function runOCR(pageIdx){
     const {width:pw,height:ph}=pdfLibDoc.getPage(pageIdx).getSize();
     const sx=pw/cv.width, sy=ph/cv.height;
     const words=(result.data.words||[])
-      .filter(w=>w.text&&w.text.trim().length>0&&(w.confidence==null||w.confidence>35));
+      .filter(w=>w.text&&w.text.trim().length>0&&(w.confidence==null||w.confidence>30));
     allText=words.map(w=>{
       const h=(w.bbox.y1-w.bbox.y0)*sy;
       return {
