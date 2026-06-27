@@ -9,6 +9,110 @@ let zoom=1.0;const SCALE=1.5;
 let history=[],pendingCoords=null,pendingPage=null;
 let textStyle='bold',activePanel=null;
 let ocrRunning=false,ocrLines=[];
+// ── Click to edit existing text ──────────────────────
+let textItems=[], lastTextPage=-1;
+
+async function loadTextItems(pageIdx){
+  if(lastTextPage===pageIdx&&textItems.length)return;
+  const b=await pdfLibDoc.save();
+  const pjs=await pdfjsLib.getDocument({data:b.slice()}).promise;
+  const pg=await pjs.getPage(pageIdx+1);
+  const content=await pg.getTextContent();
+  const {width:pw,height:ph}=pdfLibDoc.getPage(pageIdx).getSize();
+  textItems=content.items
+    .filter(it=>it.str&&it.str.trim())
+    .map(it=>{
+      const t=it.transform;
+      const pdfX=t[4], pdfY=t[5];
+      const fontSize=Math.abs(t[3]);
+      const pdfW=it.width||fontSize*it.str.length*0.55;
+      const pdfH=fontSize;
+      const bold=it.fontName&&it.fontName.toLowerCase().includes('bold');
+      return {str:it.str,pdfX,pdfY,pdfW,pdfH,fontSize,bold};
+    });
+  lastTextPage=pageIdx;
+}
+
+async function handleTextClick(e,pageIdx){
+  if(curTool!=='select')return;
+  const dispCv=document.querySelector('#pw'+pageIdx+' canvas');
+  if(!dispCv)return;
+  showLoad('Buscando texto...');
+  await loadTextItems(pageIdx);
+  hideLoad();
+  const r=dispCv.getBoundingClientRect();
+  const {width:pw,height:ph}=pdfLibDoc.getPage(pageIdx).getSize();
+  const relX=(e.clientX-r.left)/r.width;
+  const relY=(e.clientY-r.top)/r.height;
+  const cx=relX*pw;
+  const cy=ph-(relY*ph);
+  const hit=textItems.find(t=>{
+    const p=Math.max(2,t.fontSize*0.25);
+    return cx>=t.pdfX-p&&cx<=t.pdfX+t.pdfW+p&&cy>=t.pdfY-p&&cy<=t.pdfY+t.pdfH+p;
+  });
+  if(!hit){setMsg('Haz clic sobre el texto');return;}
+  // Open inline editor
+  const ex=document.getElementById('inline-ed');if(ex)ex.remove();
+  const scaleX=r.width/pw, scaleY=r.height/ph;
+  const sx=r.left+hit.pdfX*scaleX;
+  const sy=r.top+(ph-hit.pdfY-hit.pdfH)*scaleY;
+  const sw=Math.max(hit.pdfW*scaleX+20,60);
+  const sh=Math.max(hit.pdfH*scaleY+4,12);
+  const sf=Math.max(8,hit.pdfH*scaleY*0.85);
+  const inp=document.createElement('input');
+  inp.id='inline-ed';inp.type='text';inp.value=hit.str;
+  inp.style.cssText=[
+    'position:fixed','left:'+sx+'px','top:'+sy+'px',
+    'width:'+sw+'px','height:'+sh+'px','font-size:'+sf+'px',
+    'font-family:Arial,Helvetica,sans-serif',
+    'font-weight:'+(hit.bold?'bold':'normal'),
+    'padding:0 3px','border:2px solid #6366f1',
+    'background:rgba(255,255,255,.97)','color:#1e1b4b',
+    'outline:none','border-radius:3px','z-index:200',
+    'box-shadow:0 2px 16px rgba(99,102,241,.5)','line-height:1'
+  ].join(';');
+  document.body.appendChild(inp);
+  inp.focus();inp.select();
+
+  async function commit(){
+    const nTxt=inp.value;
+    inp.remove();
+    if(nTxt===hit.str)return;
+    showLoad('Guardando...');await snapshot();
+    try{
+      const page=pdfLibDoc.getPage(pageIdx);
+      // Whiteout original
+      page.drawRectangle({
+        x:hit.pdfX-1,y:hit.pdfY-1,
+        width:hit.pdfW+2,height:hit.pdfH+2,
+        color:PDFLib.rgb(1,1,1),borderWidth:0
+      });
+      // Write new text
+      const font=await pdfLibDoc.embedFont(
+        hit.bold?PDFLib.StandardFonts.HelveticaBold:PDFLib.StandardFonts.Helvetica
+      );
+      page.drawText(nTxt.trim(),{
+        x:hit.pdfX,y:hit.pdfY,
+        size:Math.max(4,hit.fontSize),font,
+        color:PDFLib.rgb(0,0,0),
+        maxWidth:hit.pdfW+100
+      });
+      textItems=[];lastTextPage=-1;
+      await rerenderPage(pageIdx);
+      setMsg('\u2713 Texto editado');
+    }catch(err){setMsg('Error: '+err.message);}
+    hideLoad();
+  }
+  inp.addEventListener('keydown',ev=>{
+    if(ev.key==='Enter'){ev.preventDefault();commit();}
+    if(ev.key==='Escape'){inp.remove();}
+  });
+  inp.addEventListener('blur',()=>{
+    setTimeout(()=>{if(document.getElementById('inline-ed'))commit();},200);
+  });
+}
+
+
 let pendingReplace=null;
 
 const $=id=>document.getElementById(id);
@@ -129,7 +233,7 @@ async function rerenderPage(i){
   await pg.render({canvasContext:ctx,viewport:vp}).promise;
   const scv=document.querySelector('#si'+i+' canvas');
   if(scv){scv.width=vp.width;scv.height=vp.height;scv.getContext('2d').drawImage(cv,0,0);}
-  textItems=[]; // reset text cache after rerender
+  textItems=[]; lastTextPage=-1; // reset text cache after rerender
 }
 
 function highlightActive(){
