@@ -388,19 +388,31 @@ async function runOCR(){
     }
     ctx.putImageData(id,0,0);
 
-    showLoad('Reconociendo texto (descarga ~2MB la primera vez)...');
+    showLoad('Iniciando OCR...');
 
-    // Tesseract.js — funciona en https:// sin restricciones
-    const result=await Tesseract.recognize(cv,'spa',{
-      logger:m=>{
-        if(m.status==='recognizing text')
-          showLoad('Reconociendo... '+Math.round(m.progress*100)+'%');
-        else if(m.status==='loading language traineddata')
-          showLoad('Cargando idioma espa\u00f1ol...');
-        else if(m.status==='initializing tesseract')
-          showLoad('Iniciando motor OCR...');
-      }
-    });
+    // Tesseract.js — funciona en https://
+    let result;
+    try {
+      result = await Tesseract.recognize(cv, 'eng', {
+        logger: m => {
+          console.log('Tesseract:', m.status, m.progress);
+          if(m.status==='recognizing text')
+            showLoad('Reconociendo... '+Math.round(m.progress*100)+'%');
+          else if(m.status==='loading language traineddata')
+            showLoad('Descargando datos OCR (1 vez ~2MB)...');
+          else if(m.status==='initializing tesseract')
+            showLoad('Iniciando motor OCR...');
+          else if(m.status==='loading tesseract core')
+            showLoad('Cargando motor OCR...');
+          else
+            showLoad(m.status+'...');
+        }
+      });
+    } catch(ocrErr) {
+      throw new Error('Tesseract fallo: ' + ocrErr.message);
+    }
+    console.log('OCR result words:', result.data.words.length);
+    console.log('OCR text preview:', result.data.text.substring(0,200));
 
     const dispCv=document.querySelector('#pw'+curPage+' canvas');
     const dispW=dispCv.offsetWidth||dispCv.clientWidth||700;
@@ -441,8 +453,16 @@ async function runOCR(){
     }
     ocrLines.sort((a,b)=>a.cy0-b.cy0||a.cx0-b.cx0);
 
+    const totalWords = result.data.words.length;
+    console.log('Total raw words from OCR:', totalWords);
+    console.log('Lines after grouping:', ocrLines.length);
+    
     if(!ocrLines.length){
-      setMsg('No se detect\u00f3 texto en esta p\u00e1gina');
+      if(totalWords === 0){
+        setMsg('OCR no detect\u00f3 palabras \u2014 revisa la consola del navegador (F12)');
+      } else {
+        setMsg('Se encontraron '+totalWords+' palabras pero se filtraron todas \u2014 intenta con otra p\u00e1gina');
+      }
       hideLoad(); ocrRunning=false; $('t-ocr').classList.remove('on');
       return;
     }
