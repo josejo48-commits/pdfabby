@@ -137,11 +137,18 @@ function highlightActive(){
 function getCoords(e,i){
   const cv=document.querySelector('#pw'+i+' canvas');
   const r=cv.getBoundingClientRect();
+  // Normalize click to 0-1 range relative to displayed canvas
+  const relX=(e.clientX-r.left)/r.width;
+  const relY=(e.clientY-r.top)/r.height;
+  // Convert to PDF points using page size
+  const page=pdfLibDoc.getPage(i);
+  const {width:pw,height:ph}=page.getSize();
+  const pdfX=relX*pw;
+  const pdfY=ph-(relY*ph); // PDF Y is flipped
+  // Also keep canvas pixel coords for dbox display
   const sx=cv.width/r.width,sy=cv.height/r.height;
   const px=(e.clientX-r.left)*sx,py=(e.clientY-r.top)*sy;
-  const sc=getScale();
-  const {height}=pdfLibDoc.getPage(i).getSize();
-  return {px,py,pdfX:px/sc,pdfY:height-py/sc,sx,sy};
+  return {px,py,pdfX,pdfY,sx,sy};
 }
 function getTouchCoords(e,i){
   const t=e.touches[0]||e.changedTouches[0];
@@ -275,8 +282,15 @@ async function applyReplace(){
     const page=pdfLibDoc.getPage(i);
     const areaW=area.x1-area.x0,areaH=area.y1-area.y0;
     page.drawRectangle({x:area.x0-1,y:area.y0-1,width:areaW+2,height:areaH+2,color:PDFLib.rgb(1,1,1),borderWidth:0});
-    const font=await pdfLibDoc.embedFont(bold?PDFLib.StandardFonts.HelveticaBold:PDFLib.StandardFonts.Helvetica);
-    page.drawText(txt,{x:area.x0+1,y:area.y0+areaH*0.2,size:sz,font,color:PDFLib.rgb(r,g,b),maxWidth:Math.max(5,areaW-2)});
+    let fontName;
+    if(bold&&italic) fontName=PDFLib.StandardFonts.HelveticaBoldOblique;
+    else if(bold)    fontName=PDFLib.StandardFonts.HelveticaBold;
+    else if(italic)  fontName=PDFLib.StandardFonts.HelveticaOblique;
+    else             fontName=PDFLib.StandardFonts.Helvetica;
+    const font=await pdfLibDoc.embedFont(fontName);
+    // Auto-size: if sz not set use area height
+    const fontSize=sz>0?sz:Math.max(6,Math.min(areaH*0.75,72));
+    page.drawText(txt,{x:area.x0+2,y:area.y0+areaH*0.15,size:fontSize,font,color:PDFLib.rgb(r,g,b),maxWidth:Math.max(5,areaW-4)});
     await rerenderPage(i);setMsg('Texto reemplazado \u2713');
   }catch(e){setMsg('Error: '+e.message);}
   hideLoad();
