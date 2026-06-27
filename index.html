@@ -109,6 +109,18 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 .rt-acts{display:flex;gap:8px;margin-top:4px}
 .rt-ok{flex:2;padding:10px;border-radius:9px;border:none;background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;font-size:13px;font-weight:800;cursor:pointer}
 .rt-cancel{flex:1;padding:10px;border-radius:9px;border:1.5px solid #fed7aa;background:#fff7ed;color:#6b7280;font-size:13px;font-weight:700;cursor:pointer}
+#edit-text-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(99,102,241,.28);padding:22px;width:340px;z-index:500;display:none;border:2px solid #e0e7ff}
+#edit-text-modal.show{display:block}
+#edit-text-modal h3{font-size:14px;font-weight:900;color:#4f46e5;margin-bottom:14px}
+#ed-text{width:100%;padding:9px;border:1.5px solid #e0e7ff;border-radius:9px;font-size:13px;font-weight:600;color:#1e1b4b;outline:none;background:#fafafe;margin-bottom:14px;min-height:72px;resize:vertical;font-family:inherit;display:block}
+#ed-text:focus{border-color:#6366f1;background:#fff}
+#confirm-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(239,68,68,.25);padding:22px;width:300px;z-index:500;display:none;border:2px solid #fecaca}
+#confirm-modal.show{display:block}
+#confirm-modal h3{font-size:14px;font-weight:900;color:#ef4444;margin-bottom:10px}
+#cm-msg{font-size:13px;font-weight:600;color:#1e1b4b;margin-bottom:16px;line-height:1.4}
+.cm-acts{display:flex;gap:8px}
+.cm-ok{flex:1;padding:9px;border-radius:9px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-size:13px;font-weight:800;cursor:pointer}
+.cm-cancel{flex:1;padding:9px;border-radius:9px;border:1.5px solid #e0e7ff;background:#fafafe;color:#6b7280;font-size:13px;font-weight:700;cursor:pointer}
 </style>
 </head>
 <body>
@@ -187,7 +199,7 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
   <span>&#183;</span>
   <span id="spages">Sin PDF</span>
 </div>
-<div class="overlay-bg" id="ovbg" onclick="closeTextEdit();closeReplaceModal()"></div>
+<div class="overlay-bg" id="ovbg" onclick="closeTextEdit();closeReplaceModal();closeEditTextModal();closeConfirmModal(false)"></div>
 <div id="textedit">
   <h3>&#9999; Insertar texto</h3>
   <textarea id="te-text" placeholder="Escribe el texto aqu&#237;..."></textarea>
@@ -226,6 +238,22 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
   </div>
 </div>
 <div id="loading"><div class="spin"></div><div id="ltxt">Procesando...</div></div>
+<div id="edit-text-modal">
+  <h3>&#9999; Editar texto existente</h3>
+  <textarea id="ed-text" placeholder="Texto..."></textarea>
+  <div class="te-acts">
+    <button class="te-cancel" onclick="closeEditTextModal()">Cancelar</button>
+    <button class="te-ok" onclick="applyEditText()">&#10003; Guardar</button>
+  </div>
+</div>
+<div id="confirm-modal">
+  <h3>&#9888; Confirmar</h3>
+  <div id="cm-msg"></div>
+  <div class="cm-acts">
+    <button class="cm-cancel" onclick="closeConfirmModal(false)">Cancelar</button>
+    <button class="cm-ok" onclick="closeConfirmModal(true)">Confirmar</button>
+  </div>
+</div>
 <script src="pdf-lib.js"></script>
 <script src="pdf.js"></script>
 <script src="app.js"></script>

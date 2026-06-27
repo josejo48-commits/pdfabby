@@ -17,6 +17,8 @@ let history=[], pendingCoords=null, pendingPage=null;
 let textStyle='bold', activePanel=null;
 let allText=[], allTextLoaded=false;
 let pendingReplace=null, rtStyle='bold';
+let pendingEditItem=null, pendingEditPageIdx=null;
+let pendingConfirmResolve=null;
 
 const $=id=>document.getElementById(id);
 const setMsg=m=>$('smsg').textContent=m;
@@ -72,7 +74,7 @@ async function loadPDF(input){
     $('spages').textContent=pageCount+' p\u00e1gina'+(pageCount>1?'s':'');
     $('pginfo').textContent=pageCount+' p\u00e1g.';
     setMsg('PDF cargado \u2713');
-  }catch(e){alert('Error: '+e.message);}
+  }catch(e){setMsg('Error al cargar: '+e.message);}
   hideLoad(); input.value='';
 }
 
@@ -168,7 +170,7 @@ function getTouchCoords(e,i){
 
 // Click handler (para selección y editar texto)
 async function onClick(e,i){
-  if(curTool==='select'){
+  if(curTool==='select'||curTool==='edittext'){
     curPage=i; highlightActive();
     await handleTextClick(e,i);
   }
@@ -194,7 +196,7 @@ function onMove(e,i){
 }
 async function onUp(e,i){
   const c=getCoords(e,i);
-  if(curTool==='addtext'||curTool==='edittext'){
+  if(curTool==='addtext'){
     pendingCoords=c; pendingPage=i; openTextEdit(); return;
   }
   if(!drawing)return; drawing=false;
@@ -210,14 +212,14 @@ async function onUp(e,i){
   curPage=i; highlightActive();
 }
 function onTouchStart(e,i){
-  if(curTool==='select'){curPage=i;highlightActive();return;}
-  if(curTool==='addtext'||curTool==='edittext'){curPage=i;return;}
+  if(curTool==='select'||curTool==='edittext'){curPage=i;highlightActive();return;}
+  if(curTool==='addtext'){curPage=i;return;}
   curPage=i; drawing=true; drawStart=getTouchCoords(e,i); e.preventDefault();
 }
 async function onTouchEnd(e,i){
   const c=getTouchCoords(e,i);
-  if(curTool==='select'){await handleTextClick(e,i);return;}
-  if(curTool==='addtext'||curTool==='edittext'){pendingCoords=c;pendingPage=i;openTextEdit();return;}
+  if(curTool==='select'||curTool==='edittext'){await handleTextClick(e,i);return;}
+  if(curTool==='addtext'){pendingCoords=c;pendingPage=i;openTextEdit();return;}
   if(!drawing)return; drawing=false;
   const db=$('db'+i); if(db)db.style.display='none';
   if(curTool==='replace'){
@@ -332,7 +334,7 @@ function showTextPicker(pageIdx){
       row.textContent=item.str;
       row.onmouseenter=()=>{row.style.background='#ede9fe';row.style.borderColor='#6366f1';};
       row.onmouseleave=()=>{row.style.background='#fafafe';row.style.borderColor='#e0e7ff';};
-      row.onclick=()=>{ closeTextPicker(); editTextItem(item,pageIdx); };
+      row.onclick=()=>{ closeTextPicker(); openEditTextModal(item,pageIdx); };
       list.appendChild(row);
     });
   }
@@ -342,9 +344,24 @@ function showTextPicker(pageIdx){
   setTimeout(()=>search.focus(),100);
 }
 
-async function editTextItem(item, pageIdx){
-  const newText=prompt('Texto actual:\n"'+item.str+'"\n\nEscribe el texto nuevo:', item.str);
-  if(newText===null||newText.trim()===item.str) return;
+function openEditTextModal(item,pageIdx){
+  pendingEditItem=item; pendingEditPageIdx=pageIdx;
+  $('ed-text').value=item.str;
+  $('edit-text-modal').classList.add('show');
+  $('ovbg').classList.add('show');
+  setTimeout(()=>$('ed-text').focus(),80);
+}
+function closeEditTextModal(){
+  $('edit-text-modal').classList.remove('show');
+  $('ovbg').classList.remove('show');
+  pendingEditItem=null; pendingEditPageIdx=null;
+}
+async function applyEditText(){
+  const item=pendingEditItem, pageIdx=pendingEditPageIdx;
+  if(!item){closeEditTextModal();return;}
+  const newText=$('ed-text').value;
+  closeEditTextModal();
+  if(newText==null||newText.trim()===item.str) return;
   showLoad('Aplicando cambio...');
   await snapshot();
   try{
@@ -371,6 +388,19 @@ async function editTextItem(item, pageIdx){
     setMsg('\u2713 "'+item.str+'" \u2192 "'+newText.trim()+'"');
   }catch(err){setMsg('Error: '+err.message);}
   hideLoad();
+}
+
+// ── Confirmación propia (reemplaza confirm() nativo) ──
+function showConfirm(msg){
+  $('cm-msg').textContent=msg;
+  $('confirm-modal').classList.add('show');
+  $('ovbg').classList.add('show');
+  return new Promise(resolve=>{pendingConfirmResolve=resolve;});
+}
+function closeConfirmModal(result){
+  $('confirm-modal').classList.remove('show');
+  $('ovbg').classList.remove('show');
+  if(pendingConfirmResolve){pendingConfirmResolve(result);pendingConfirmResolve=null;}
 }
 
 // ── Modal insertar texto ──────────────────────────────
@@ -453,7 +483,8 @@ async function rotPage(a){
 function delCurPage(){delPageAt(curPage);}
 async function delPageAt(i){
   if(!pdfLibDoc||pageCount<=1){setMsg('No se puede eliminar la \u00fanica p\u00e1gina');return;}
-  if(!confirm('\u00bfEliminar p\u00e1gina '+(i+1)+'?'))return;
+  const ok=await showConfirm('\u00bfEliminar p\u00e1gina '+(i+1)+'?');
+  if(!ok)return;
   showLoad('Eliminando...'); await snapshot();
   try{
     pdfLibDoc.removePage(i); pageCount=pdfLibDoc.getPageCount();
@@ -533,7 +564,7 @@ const dz=$('dz'),area=$('area');
   });
 });
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){closeTextEdit();closeReplaceModal();closeTextPicker();}
+  if(e.key==='Escape'){closeTextEdit();closeReplaceModal();closeTextPicker();closeEditTextModal();closeConfirmModal(false);}
   if(e.ctrlKey||e.metaKey){
     if(e.key==='+'){e.preventDefault();changeZoom(.25);}
     else if(e.key==='-'){e.preventDefault();changeZoom(-.25);}
