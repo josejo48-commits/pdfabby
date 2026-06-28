@@ -447,9 +447,10 @@ function sampleTopBottom(pageIdx,x0,x1,y0,y1){
 function coverWithBackground(page,pageIdx,x0,y0,x1,y1){
   const w=x1-x0, h=y1-y0;
   if(w<=0||h<=0)return;
-  const n=Math.max(3,Math.min(20,Math.round(w)));
+  const n=Math.max(3,Math.min(24,Math.round(w)));
   const stripW=w/n;
   let fallback=null;
+  const cols=[];
   for(let k=0;k<n;k++){
     const sx0=x0+k*stripW, sx1=sx0+stripW;
     let col=sampleTopBottom(pageIdx,sx0,sx1,y0,y1);
@@ -457,6 +458,21 @@ function coverWithBackground(page,pageIdx,x0,y0,x1,y1){
       if(!fallback) fallback=sampleBackgroundColor(pageIdx,x0,y0,x1,y1);
       col=fallback;
     }
+    cols.push(col);
+  }
+  // Suavizado: promedio m\u00f3vil con las franjas vecinas, para que el cambio
+  // de color entre franjas sea gradual y no un salto brusco
+  const win=2;
+  const smooth=cols.map((c,idx)=>{
+    let r=0,g=0,b=0,cnt=0;
+    for(let j=Math.max(0,idx-win);j<=Math.min(n-1,idx+win);j++){
+      r+=cols[j][0]; g+=cols[j][1]; b+=cols[j][2]; cnt++;
+    }
+    return [r/cnt,g/cnt,b/cnt];
+  });
+  for(let k=0;k<n;k++){
+    const sx0=x0+k*stripW, sx1=sx0+stripW;
+    const col=smooth[k];
     page.drawRectangle({
       x:sx0-0.4, y:y0, width:stripW+0.8, height:h,
       color:PDFLib.rgb(col[0],col[1],col[2]), borderWidth:0
