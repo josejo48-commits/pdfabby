@@ -409,6 +409,61 @@ function closeEditTextModal(){
 }
 // ── Detecta el color real del papel alrededor de una zona ──
 // (en vez de tapar siempre con blanco puro, que se ve como un parche en escaneos)
+// Muestreo local (solo arriba/abajo) para una franja angosta -- permite que
+// cada franja tenga su propio tono y as\u00ed seguir degradados de luz horizontales
+function sampleTopBottom(pageIdx,x0,x1,y0,y1){
+  try{
+    const cv=document.querySelector('#pw'+pageIdx+' canvas');
+    if(!cv) return null;
+    const {width:pw,height:ph}=pdfLibDoc.getPage(pageIdx).getSize();
+    const sx=cv.width/pw, sy=cv.height/ph;
+    const px0=x0*sx, px1=x1*sx;
+    const py0=cv.height-y1*sy, py1=cv.height-y0*sy;
+    const ctx=cv.getContext('2d');
+    const m=3, W=cv.width, H=cv.height, samples=[];
+    function grab(gx,gy,gw,gh){
+      gx=Math.max(0,Math.floor(gx)); gy=Math.max(0,Math.floor(gy));
+      gw=Math.min(W-gx,Math.ceil(gw)); gh=Math.min(H-gy,Math.ceil(gh));
+      if(gw<=0||gh<=0)return;
+      const d=ctx.getImageData(gx,gy,gw,gh).data;
+      for(let p=0;p<d.length;p+=4){
+        const r=d[p],g=d[p+1],b=d[p+2];
+        if((r+g+b)/3>150) samples.push([r,g,b]);
+      }
+    }
+    grab(px0,py0-m,px1-px0,m);
+    grab(px0,py1,px1-px0,m);
+    if(!samples.length) return null;
+    let r=0,g=0,b=0;
+    for(const s of samples){r+=s[0];g+=s[1];b+=s[2];}
+    const n=samples.length;
+    return [r/n/255,g/n/255,b/n/255];
+  }catch(err){ return null; }
+}
+
+// Tapa el \u00e1rea en varias franjas verticales finas, cada una con su propio
+// color local (en vez de un solo rect\u00e1ngulo plano), para que el "parche"
+// siga el degradado de luz real de la foto/escaneo y se note mucho menos
+function coverWithBackground(page,pageIdx,x0,y0,x1,y1){
+  const w=x1-x0, h=y1-y0;
+  if(w<=0||h<=0)return;
+  const n=Math.max(3,Math.min(20,Math.round(w)));
+  const stripW=w/n;
+  let fallback=null;
+  for(let k=0;k<n;k++){
+    const sx0=x0+k*stripW, sx1=sx0+stripW;
+    let col=sampleTopBottom(pageIdx,sx0,sx1,y0,y1);
+    if(!col){
+      if(!fallback) fallback=sampleBackgroundColor(pageIdx,x0,y0,x1,y1);
+      col=fallback;
+    }
+    page.drawRectangle({
+      x:sx0-0.4, y:y0, width:stripW+0.8, height:h,
+      color:PDFLib.rgb(col[0],col[1],col[2]), borderWidth:0
+    });
+  }
+}
+
 function sampleBackgroundColor(pageIdx,x0,y0,x1,y1){
   try{
     const cv=document.querySelector('#pw'+pageIdx+' canvas');
@@ -452,13 +507,8 @@ async function applyEditText(){
   try{
     const page=pdfLibDoc.getPage(pageIdx);
     const {width:pw}=page.getSize();
-    // Borrar texto original (con el color real del papel, no blanco puro)
-    const [br,bg,bb]=sampleBackgroundColor(pageIdx,item.pdfX-1,item.pdfY-1,item.pdfX+item.pdfW+1,item.pdfY+item.pdfH+1);
-    page.drawRectangle({
-      x:item.pdfX-1, y:item.pdfY-1,
-      width:item.pdfW+2, height:item.pdfH+2,
-      color:PDFLib.rgb(br,bg,bb), borderWidth:0
-    });
+    // Borrar texto original (sigue el degradado real del papel/foto)
+    coverWithBackground(page,pageIdx,item.pdfX-1,item.pdfY-1,item.pdfX+item.pdfW+1,item.pdfY+item.pdfH+1);
     // Escribir nuevo
     const font=await pdfLibDoc.embedFont(
       item.bold?PDFLib.StandardFonts.HelveticaBold:PDFLib.StandardFonts.Helvetica
@@ -565,8 +615,7 @@ async function applyReplace(){
   try{
     const page=pdfLibDoc.getPage(i);
     const areaW=area.x1-area.x0, areaH=area.y1-area.y0;
-    const [br,bg,bb]=sampleBackgroundColor(i,area.x0-1,area.y0-1,area.x1+1,area.y1+1);
-    page.drawRectangle({x:area.x0-1,y:area.y0-1,width:areaW+2,height:areaH+2,color:PDFLib.rgb(br,bg,bb),borderWidth:0});
+    coverWithBackground(page,i,area.x0-1,area.y0-1,area.x1+1,area.y1+1);
     const fonts={bold:PDFLib.StandardFonts.HelveticaBold,italic:PDFLib.StandardFonts.HelveticaOblique,normal:PDFLib.StandardFonts.Helvetica};
     const font=await pdfLibDoc.embedFont(fonts[rtStyle]||fonts.normal);
     const fontSize=sz>0?sz:Math.max(6,Math.min(areaH*0.75,72));
