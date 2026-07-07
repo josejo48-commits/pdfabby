@@ -1105,7 +1105,7 @@ async function doCompress() {
       for (let i = 1; i <= pageCount; i++) {
         setCompressProgress(10 + (i / pageCount) * 70, `Comprimiendo página ${i} de ${pageCount}...`);
         const page = await _pjs.getPage(i);
-        const renderViewport = page.getViewport({ scale: 1.5 });
+        const renderViewport = page.getViewport({ scale: 1.2 });
         const canvas = document.createElement('canvas');
         canvas.width = renderViewport.width;
         canvas.height = renderViewport.height;
@@ -1121,7 +1121,16 @@ async function doCompress() {
       resultBytes = await newDoc.save();
     }
 
-    const newSize = resultBytes.length;
+    let newSize = resultBytes.length;
+    let keptOriginal = false;
+
+    // Nunca dejar un archivo más pesado que el original
+    if (newSize >= originalSize) {
+      resultBytes = originalBytes;
+      newSize = originalSize;
+      keptOriginal = true;
+    }
+
     setCompressProgress(95, 'Guardando...');
 
     await reloadDoc(resultBytes);
@@ -1134,7 +1143,9 @@ async function doCompress() {
 
     const pct = Math.round((1 - newSize / originalSize) * 100);
     let finalMsg;
-    if (pct >= 3) {
+    if (keptOriginal) {
+      finalMsg = `ℹ️ Este PDF ya está bien optimizado (${(originalSize / 1024).toFixed(0)}KB) — no se pudo reducir más, así que se dejó igual.`;
+    } else if (pct >= 3) {
       finalMsg = `✅ Listo: ${(originalSize / 1024).toFixed(0)}KB → ${(newSize / 1024).toFixed(0)}KB (-${pct}%)`;
     } else {
       finalMsg = `✅ Listo (${(newSize / 1024).toFixed(0)}KB). Este PDF ya estaba optimizado, casi no había nada que reducir.`;
