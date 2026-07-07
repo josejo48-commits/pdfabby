@@ -316,7 +316,7 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 let wordOpt = 'all';
 
 function openWordModal() {
-  if (!window.pdfLibDoc) { alert('Primero abre un PDF.'); return; }
+  if (!pdfLibDoc) { alert('Primero abre un PDF.'); return; }
   document.getElementById('word-modal').classList.add('show');
   document.getElementById('ovbg').classList.add('show');
   document.getElementById('wm-progress').style.display = 'none';
@@ -349,8 +349,8 @@ async function convertToWord() {
 
   try {
     // Determinar páginas a convertir
-    const totalPages = window.pageCount || 1;
-    const activePage = (window.curPage || 0) + 1;
+    const totalPages = pageCount || 1;
+    const activePage = (curPage || 0) + 1;
     const pages = wordOpt === 'cur' ? [activePage] : Array.from({length: totalPages}, (_, i) => i + 1);
 
     setWordProgress(5, 'Preparando páginas...');
@@ -361,7 +361,7 @@ async function convertToWord() {
       const pgNum = pages[i];
       setWordProgress(10 + (i / pages.length) * 65, `Leyendo página ${pgNum} de ${pages[pages.length-1]}...`);
 
-      const _bytes = await window.pdfLibDoc.save();
+      const _bytes = await pdfLibDoc.save();
       const _pjs = await pdfjsLib.getDocument({data: _bytes.slice()}).promise;
       const page = await _pjs.getPage(pgNum);
 
