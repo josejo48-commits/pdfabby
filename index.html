@@ -121,6 +121,25 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 .cm-acts{display:flex;gap:8px}
 .cm-ok{flex:1;padding:9px;border-radius:9px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-size:13px;font-weight:800;cursor:pointer}
 .cm-cancel{flex:1;padding:9px;border-radius:9px;border:1.5px solid #e0e7ff;background:#fafafe;color:#6b7280;font-size:13px;font-weight:700;cursor:pointer}
+#word-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(3,105,161,.25);padding:24px;width:380px;z-index:500;display:none;border:2px solid #bae6fd}
+#word-modal.show{display:block}
+#word-modal h3{font-size:15px;font-weight:900;color:#0369a1;margin-bottom:6px}
+#word-modal p{font-size:12px;color:#64748b;margin-bottom:16px;line-height:1.5}
+.wm-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.wm-opt{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1.5px solid #e0e7ff;background:#fafafe;cursor:pointer;transition:.15s}
+.wm-opt:hover{border-color:#7dd3fc;background:#f0f9ff}
+.wm-opt.sel{border-color:#0369a1;background:#e0f2fe}
+.wm-opt-ico{font-size:22px}
+.wm-opt-info{flex:1}
+.wm-opt-title{font-size:13px;font-weight:800;color:#1e1b4b}
+.wm-opt-desc{font-size:11px;color:#64748b;margin-top:1px}
+.wm-acts{display:flex;gap:8px}
+.wm-cancel{flex:1;padding:9px;border-radius:9px;border:1.5px solid #e0e7ff;background:#fafafe;color:#6b7280;font-size:13px;font-weight:700;cursor:pointer}
+.wm-ok{flex:2;padding:9px;border-radius:9px;border:none;background:linear-gradient(135deg,#0369a1,#0284c7);color:#fff;font-size:13px;font-weight:800;cursor:pointer}
+.wm-progress{display:none;margin-bottom:14px}
+.wm-progress-bar{height:6px;background:#e0e7ff;border-radius:3px;overflow:hidden;margin-top:6px}
+.wm-progress-fill{height:100%;background:linear-gradient(90deg,#0369a1,#38bdf8);border-radius:3px;width:0%;transition:width .4s}
+.wm-status{font-size:11px;color:#0369a1;font-weight:700;margin-top:4px}
 </style>
 </head>
 <body>
@@ -156,6 +175,12 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
     <div class="tgrp-label">Insertar</div>
     <div class="tgrp-inner">
       <button class="tbtn" id="t-img" onclick="toggleTool('img')"><span class="ico">&#128444;</span>Imagen</button>
+    </div>
+  </div>
+  <div class="tgrp">
+    <div class="tgrp-label">Convertir</div>
+    <div class="tgrp-inner">
+      <button class="tbtn" id="t-toword" onclick="openWordModal()" style="background:#f0f9ff;color:#0369a1;border-color:#bae6fd"><span class="ico">&#128196;</span>PDF a Word</button>
     </div>
   </div>
   <div class="tgrp">
@@ -237,6 +262,34 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
     <button class="rt-ok" onclick="applyReplace()">&#10003; Reemplazar</button>
   </div>
 </div>
+<div id="word-modal">
+  <h3>&#128196; Convertir PDF a Word</h3>
+  <p>La IA leerá el contenido del PDF y generará un documento Word (.docx) editable con el texto y estructura preservados.</p>
+  <div class="wm-opts">
+    <div class="wm-opt sel" id="wm-opt-all" onclick="selWordOpt('all')">
+      <div class="wm-opt-ico">&#128196;</div>
+      <div class="wm-opt-info">
+        <div class="wm-opt-title">Documento completo</div>
+        <div class="wm-opt-desc">Convierte todas las páginas del PDF</div>
+      </div>
+    </div>
+    <div class="wm-opt" id="wm-opt-cur" onclick="selWordOpt('cur')">
+      <div class="wm-opt-ico">&#128210;</div>
+      <div class="wm-opt-info">
+        <div class="wm-opt-title">Página actual</div>
+        <div class="wm-opt-desc">Solo convierte la página que estás viendo</div>
+      </div>
+    </div>
+  </div>
+  <div class="wm-progress" id="wm-progress">
+    <div class="wm-status" id="wm-status">Analizando PDF con IA...</div>
+    <div class="wm-progress-bar"><div class="wm-progress-fill" id="wm-fill"></div></div>
+  </div>
+  <div class="wm-acts">
+    <button class="wm-cancel" onclick="closeWordModal()">Cancelar</button>
+    <button class="wm-ok" id="wm-go" onclick="convertToWord()">&#128196; Convertir a Word</button>
+  </div>
+</div>
 <div id="loading"><div class="spin"></div><div id="ltxt">Procesando...</div></div>
 <div id="edit-text-modal">
   <h3>&#9999; Editar texto existente</h3>
@@ -258,5 +311,197 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 <script src="pdf.js"></script>
 <script src="tesseract.js"></script>
 <script src="app.js"></script>
+<script>
+// ── PDF a Word con Claude AI ──────────────────────────────────────────────
+let wordOpt = 'all';
+
+function openWordModal() {
+  if (!window.pdfDoc) { alert('Primero abre un PDF.'); return; }
+  document.getElementById('word-modal').classList.add('show');
+  document.getElementById('ovbg').classList.add('show');
+  document.getElementById('wm-progress').style.display = 'none';
+  document.getElementById('wm-go').disabled = false;
+  document.getElementById('wm-go').textContent = '📄 Convertir a Word';
+}
+
+function closeWordModal() {
+  document.getElementById('word-modal').classList.remove('show');
+  document.getElementById('ovbg').classList.remove('show');
+}
+
+function selWordOpt(opt) {
+  wordOpt = opt;
+  document.querySelectorAll('.wm-opt').forEach(el => el.classList.remove('sel'));
+  document.getElementById('wm-opt-' + opt).classList.add('sel');
+}
+
+function setWordProgress(pct, msg) {
+  document.getElementById('wm-fill').style.width = pct + '%';
+  document.getElementById('wm-status').textContent = msg;
+}
+
+async function convertToWord() {
+  const btn = document.getElementById('wm-go');
+  btn.disabled = true;
+  btn.textContent = 'Convirtiendo...';
+  const prog = document.getElementById('wm-progress');
+  prog.style.display = 'block';
+
+  try {
+    // Determinar páginas a convertir
+    const totalPages = window.pdfDoc ? window.pdfDoc.numPages : 1;
+    const curPage = window.curPage || 1;
+    const pages = wordOpt === 'cur' ? [curPage] : Array.from({length: totalPages}, (_, i) => i + 1);
+
+    setWordProgress(5, 'Preparando páginas...');
+
+    // Extraer texto + imagen de cada página con Claude
+    const allContent = [];
+    for (let i = 0; i < pages.length; i++) {
+      const pgNum = pages[i];
+      setWordProgress(10 + (i / pages.length) * 60, `Analizando página ${pgNum} de ${pages[pages.length-1]}...`);
+
+      // Renderizar página a canvas
+      const page = await window.pdfDoc.getPage(pgNum);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const imgData = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+      // Llamar a Claude API
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1000,
+          system: 'Eres un experto en extracción de texto de documentos. Analiza la imagen del PDF y extrae TODO el contenido textual de forma estructurada. Responde SOLO con JSON sin texto adicional, sin markdown. Formato: {"titulo":"título del documento si existe o vacío","parrafos":["párrafo1","párrafo2",...],"tablas":[{"headers":["col1","col2"],"filas":[["val1","val2"]]}]}. Preserva la estructura lógica, separa párrafos correctamente, incluye texto de tablas.',
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imgData } },
+              { type: 'text', text: `Extrae todo el contenido textual de esta página ${pgNum} del PDF. Devuelve JSON estructurado.` }
+            ]
+          }]
+        })
+      });
+
+      const data = await resp.json();
+      let content = { titulo: '', parrafos: [], tablas: [] };
+      try {
+        const raw = (data.content?.[0]?.text || '{}').replace(/```json|```/g, '').trim();
+        content = JSON.parse(raw);
+      } catch(e) {
+        // Fallback: texto plano
+        const txt = data.content?.[0]?.text || '';
+        content.parrafos = txt.split('\n').filter(l => l.trim());
+      }
+      allContent.push({ page: pgNum, ...content });
+    }
+
+    setWordProgress(75, 'Generando documento Word...');
+
+    // Construir DOCX con docx-js desde CDN
+    await loadDocxLib();
+
+    const { Document, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, Packer } = window.docx;
+
+    const children = [];
+
+    for (const pg of allContent) {
+      // Título de página si hay múltiples
+      if (pages.length > 1) {
+        children.push(new Paragraph({
+          children: [new TextRun({ text: `Página ${pg.page}`, bold: true, size: 20, color: '6366f1' })],
+          spacing: { before: 200, after: 100 }
+        }));
+      }
+
+      // Título del documento (primera página)
+      if (pg.titulo && pg.titulo.trim()) {
+        children.push(new Paragraph({
+          text: pg.titulo,
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 100, after: 200 }
+        }));
+      }
+
+      // Párrafos
+      for (const p of (pg.parrafos || [])) {
+        if (!p.trim()) continue;
+        children.push(new Paragraph({
+          children: [new TextRun({ text: p, size: 22 })],
+          spacing: { before: 60, after: 60 }
+        }));
+      }
+
+      // Tablas
+      for (const tabla of (pg.tablas || [])) {
+        if (!tabla.headers?.length) continue;
+        const allRows = [tabla.headers, ...(tabla.filas || [])];
+        const tableRows = allRows.map((row, ri) =>
+          new TableRow({
+            children: row.map(cell =>
+              new TableCell({
+                children: [new Paragraph({
+                  children: [new TextRun({ text: String(cell || ''), bold: ri === 0, size: 20 })]
+                })],
+                width: { size: Math.floor(9000 / row.length), type: WidthType.DXA }
+              })
+            )
+          })
+        );
+        children.push(new Table({
+          rows: tableRows,
+          width: { size: 9000, type: WidthType.DXA }
+        }));
+        children.push(new Paragraph({ text: '', spacing: { after: 100 } }));
+      }
+    }
+
+    setWordProgress(90, 'Empaquetando archivo...');
+
+    const doc = new Document({
+      sections: [{ properties: {}, children }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const fname = (window.pdfFileName || 'documento').replace(/\.pdf$/i, '');
+    a.download = fname + '_convertido.docx';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    setWordProgress(100, '✅ ¡Documento Word descargado!');
+    setTimeout(() => closeWordModal(), 1800);
+
+  } catch(e) {
+    console.error(e);
+    document.getElementById('wm-status').textContent = '❌ Error: ' + e.message;
+    btn.disabled = false;
+    btn.textContent = '📄 Convertir a Word';
+  }
+}
+
+async function loadDocxLib() {
+  if (window.docx) return;
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/docx.umd.min.js';
+    s.onload = res;
+    s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+// Parchar closeTextEdit para incluir modal de Word
+const _origClose = window.closeTextEdit;
+document.getElementById('ovbg').addEventListener('click', closeWordModal, false);
+</script>
 </body>
 </html>
