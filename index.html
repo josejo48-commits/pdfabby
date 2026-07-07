@@ -265,7 +265,7 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 <div id="word-modal">
   <h3>&#128196; Convertir PDF a Word</h3>
   <p>Se leerá el texto del PDF (o se aplicará OCR si es una página escaneada) y se generará un documento Word (.docx) editable.</p>
-  <div class="wm-opts">
+  <div class="wm-opts" id="wm-opts-pages">
     <div class="wm-opt sel" id="wm-opt-all" onclick="selWordOpt('all')">
       <div class="wm-opt-ico">&#128196;</div>
       <div class="wm-opt-info">
@@ -280,6 +280,27 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
         <div class="wm-opt-desc">Solo convierte la página que estás viendo</div>
       </div>
     </div>
+  </div>
+  <div class="wm-opts" id="wm-opts-engine" style="margin-top:2px">
+    <div class="wm-opt sel" id="wm-eng-local" onclick="selWordEngine('local')">
+      <div class="wm-opt-ico">&#128241;</div>
+      <div class="wm-opt-info">
+        <div class="wm-opt-title">Local (sin internet)</div>
+        <div class="wm-opt-desc">Más rápido, calidad aproximada</div>
+      </div>
+    </div>
+    <div class="wm-opt" id="wm-eng-cc" onclick="selWordEngine('cc')">
+      <div class="wm-opt-ico">&#9729;</div>
+      <div class="wm-opt-info">
+        <div class="wm-opt-title">CloudConvert</div>
+        <div class="wm-opt-desc">Necesita internet, mejor fidelidad</div>
+      </div>
+    </div>
+  </div>
+  <div id="cc-key-row" style="display:none;margin-top:8px">
+    <div class="ol">Clave de API de CloudConvert</div>
+    <input type="text" id="cc-api-key" placeholder="Pega tu API key aquí">
+    <div class="note" style="margin-top:6px">Consíguela gratis en <b>cloudconvert.com</b> → Dashboard → API Keys. Se guarda solo en este dispositivo.</div>
   </div>
   <div class="wm-progress" id="wm-progress">
     <div class="wm-status" id="wm-status">Analizando PDF con IA...</div>
@@ -314,6 +335,7 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 <script>
 // ── PDF a Word con Claude AI ──────────────────────────────────────────────
 let wordOpt = 'all';
+let wordEngine = 'local';
 
 function openWordModal() {
   if (!pdfLibDoc) { alert('Primero abre un PDF.'); return; }
@@ -322,6 +344,8 @@ function openWordModal() {
   document.getElementById('wm-progress').style.display = 'none';
   document.getElementById('wm-go').disabled = false;
   document.getElementById('wm-go').textContent = '📄 Convertir a Word';
+  const savedKey = localStorage.getItem('cc_api_key');
+  if (savedKey) document.getElementById('cc-api-key').value = savedKey;
 }
 
 function closeWordModal() {
@@ -331,8 +355,15 @@ function closeWordModal() {
 
 function selWordOpt(opt) {
   wordOpt = opt;
-  document.querySelectorAll('.wm-opt').forEach(el => el.classList.remove('sel'));
+  document.querySelectorAll('#wm-opts-pages .wm-opt').forEach(el => el.classList.remove('sel'));
   document.getElementById('wm-opt-' + opt).classList.add('sel');
+}
+
+function selWordEngine(eng) {
+  wordEngine = eng;
+  document.querySelectorAll('#wm-opts-engine .wm-opt').forEach(el => el.classList.remove('sel'));
+  document.getElementById(eng === 'local' ? 'wm-eng-local' : 'wm-eng-cc').classList.add('sel');
+  document.getElementById('cc-key-row').style.display = (eng === 'cc') ? 'block' : 'none';
 }
 
 function setWordProgress(pct, msg) {
@@ -341,6 +372,100 @@ function setWordProgress(pct, msg) {
 }
 
 async function convertToWord() {
+  if (wordEngine === 'cc') return convertViaCloudConvert();
+  return convertToWordLocal();
+}
+
+async function convertViaCloudConvert() {
+  const btn = document.getElementById('wm-go');
+  const apiKey = document.getElementById('cc-api-key').value.trim();
+  if (!apiKey) { alert('Pega tu API key de CloudConvert primero.'); return; }
+  localStorage.setItem('cc_api_key', apiKey);
+
+  btn.disabled = true;
+  btn.textContent = 'Convirtiendo...';
+  const prog = document.getElementById('wm-progress');
+  prog.style.display = 'block';
+
+  try {
+    setWordProgress(5, 'Preparando PDF...');
+
+    // Si solo se pide la página actual, generamos un PDF de una sola página
+    let bytesToSend;
+    if (wordOpt === 'cur') {
+      const src = await pdfLibDoc.save();
+      const srcDoc = await PDFLib.PDFDocument.load(src, { ignoreEncryption: true });
+      const oneDoc = await PDFLib.PDFDocument.create();
+      const [copied] = await oneDoc.copyPages(srcDoc, [curPage]);
+      oneDoc.addPage(copied);
+      bytesToSend = await oneDoc.save();
+    } else {
+      bytesToSend = await pdfLibDoc.save();
+    }
+
+    setWordProgress(15, 'Creando trabajo en CloudConvert...');
+    const jobResp = await fetch('https://api.cloudconvert.com/v2/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({
+        tasks: {
+          'upload-my-file': { operation: 'import/upload' },
+          'convert-my-file': { operation: 'convert', input: 'upload-my-file', input_format: 'pdf', output_format: 'docx' },
+          'export-my-file': { operation: 'export/url', input: 'convert-my-file' }
+        }
+      })
+    });
+    if (!jobResp.ok) {
+      const errBody = await jobResp.json().catch(() => ({}));
+      throw new Error('CloudConvert: ' + (errBody.message || jobResp.status));
+    }
+    const job = await jobResp.json();
+    const uploadTask = job.data.tasks.find(t => t.name === 'upload-my-file');
+    if (!uploadTask || !uploadTask.result || !uploadTask.result.form) throw new Error('No se pudo iniciar la subida a CloudConvert.');
+
+    setWordProgress(30, 'Subiendo PDF...');
+    const form = uploadTask.result.form;
+    const fd = new FormData();
+    Object.entries(form.parameters).forEach(([k, v]) => fd.append(k, v));
+    fd.append('file', new Blob([bytesToSend], { type: 'application/pdf' }), 'documento.pdf');
+    const uploadResp = await fetch(form.url, { method: 'POST', body: fd });
+    if (!uploadResp.ok) throw new Error('Falló la subida del archivo a CloudConvert.');
+
+    setWordProgress(55, 'Convirtiendo en CloudConvert...');
+    const waitResp = await fetch('https://sync.api.cloudconvert.com/v2/jobs/' + job.data.id, {
+      headers: { 'Authorization': 'Bearer ' + apiKey }
+    });
+    if (!waitResp.ok) throw new Error('Error esperando la conversión.');
+    const finishedJob = await waitResp.json();
+    const exportTask = finishedJob.data.tasks.find(t => t.name === 'export-my-file');
+    if (!exportTask || exportTask.status !== 'finished' || !exportTask.result || !exportTask.result.files || !exportTask.result.files[0]) {
+      const failedTask = finishedJob.data.tasks.find(t => t.status === 'error');
+      throw new Error(failedTask ? failedTask.message : 'La conversión no terminó correctamente.');
+    }
+
+    setWordProgress(90, 'Descargando resultado...');
+    const fileUrl = exportTask.result.files[0].url;
+    const fileResp = await fetch(fileUrl);
+    const blob = await fileResp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'documento_convertido.docx';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    setWordProgress(100, '✅ ¡Documento Word descargado!');
+    setTimeout(() => closeWordModal(), 1800);
+  } catch (e) {
+    console.error(e);
+    const msg = (e && e.message) ? e.message : String(e);
+    document.getElementById('wm-status').textContent = '❌ Error: ' + msg;
+    btn.disabled = false;
+    btn.textContent = '📄 Convertir a Word';
+  }
+}
+
+async function convertToWordLocal() {
   const btn = document.getElementById('wm-go');
   btn.disabled = true;
   btn.textContent = 'Convirtiendo...';
