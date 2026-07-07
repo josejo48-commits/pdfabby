@@ -455,9 +455,6 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
     <option value="JA">Japonés</option>
     <option value="ZH">Chino (simplificado)</option>
   </select>
-  <div class="ol" style="margin-top:10px">Clave de API de DeepL</div>
-  <input type="text" id="deepl-api-key" placeholder="Pega tu API key aquí">
-  <div class="note" style="margin-top:6px">Consíguela gratis en <b>deepl.com/en/pro#developer</b>. Se guarda solo en este dispositivo.</div>
   <div class="wm-progress" id="translate-progress" style="display:none;margin-top:10px">
     <div class="wm-status" id="translate-status">Traduciendo...</div>
     <div class="wm-progress-bar"><div class="wm-progress-fill" id="translate-fill"></div></div>
@@ -945,7 +942,6 @@ document.getElementById('ovbg').addEventListener('click', closeTranslateModal, f
 
 // ── Traducir PDF ─────────────────────────────────────────────────────────
 let translatePages = 'all';
-
 function openTranslateModal() {
   if (!pdfLibDoc) { alert('Primero abre un PDF.'); return; }
   document.getElementById('translate-modal').classList.add('show');
@@ -954,8 +950,6 @@ function openTranslateModal() {
   const btn = document.getElementById('translate-go');
   btn.disabled = false;
   btn.textContent = '🌐 Traducir';
-  const savedKey = localStorage.getItem('deepl_api_key');
-  if (savedKey) document.getElementById('deepl-api-key').value = savedKey;
 }
 
 function closeTranslateModal() {
@@ -974,26 +968,40 @@ function setTranslateProgress(pct, msg) {
   document.getElementById('translate-status').textContent = msg;
 }
 
-async function deeplTranslateBatch(texts, apiKey, targetLang) {
-  const base = apiKey.trim().endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
-  const resp = await fetch(base + '/v2/translate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'DeepL-Auth-Key ' + apiKey },
-    body: JSON.stringify({ text: texts, target_lang: targetLang })
-  });
-  if (!resp.ok) {
-    const errBody = await resp.json().catch(() => ({}));
-    throw new Error('DeepL: ' + (errBody.message || resp.status));
-  }
+// Mapea nuestros códigos de idioma al código que usa Google Translate
+const GOOGLE_LANG_MAP = {
+  'ES': 'es', 'EN-US': 'en', 'EN-GB': 'en', 'PT-BR': 'pt', 'PT-PT': 'pt',
+  'FR': 'fr', 'DE': 'de', 'IT': 'it', 'NL': 'nl', 'PL': 'pl', 'RU': 'ru', 'JA': 'ja', 'ZH': 'zh-CN'
+};
+
+async function googleTranslateOne(text, targetLang) {
+  if (!text || !text.trim()) return text;
+  const gl = GOOGLE_LANG_MAP[targetLang] || 'en';
+  const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=' + gl + '&dt=t&q=' + encodeURIComponent(text);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('Google Translate: ' + resp.status);
   const data = await resp.json();
-  return data.translations.map(t => t.text);
+  return (data[0] || []).map(chunk => chunk[0]).join('');
+}
+
+// Traduce una lista de textos con concurrencia limitada (Google no soporta lotes, solo un texto por petición)
+async function googleTranslateBatch(texts, targetLang, onEach) {
+  const results = new Array(texts.length);
+  const CONCURRENCY = 4;
+  let idx = 0;
+  async function worker() {
+    while (idx < texts.length) {
+      const my = idx++;
+      results[my] = await googleTranslateOne(texts[my], targetLang);
+      if (onEach) onEach();
+    }
+  }
+  await Promise.all(new Array(CONCURRENCY).fill(0).map(() => worker()));
+  return results;
 }
 
 async function doTranslate() {
   const btn = document.getElementById('translate-go');
-  const apiKey = document.getElementById('deepl-api-key').value.trim();
-  if (!apiKey) { alert('Pega tu API key de DeepL primero.'); return; }
-  localStorage.setItem('deepl_api_key', apiKey);
   const targetLang = document.getElementById('tr-target-lang').value;
 
   btn.disabled = true;
@@ -1019,14 +1027,14 @@ async function doTranslate() {
       if (entry.type === 'line') entry.segments.forEach(seg => segRefs.push(seg));
     }));
 
-    // Traducir en lotes (máximo 50 textos por petición a DeepL)
-    const BATCH = 50;
-    for (let i = 0; i < segRefs.length; i += BATCH) {
-      setTranslateProgress(35 + (i / Math.max(1, segRefs.length)) * 45, `Traduciendo texto ${i + 1} de ${segRefs.length}...`);
-      const chunk = segRefs.slice(i, i + BATCH);
-      const chunkResult = await deeplTranslateBatch(chunk.map(s => s.text), apiKey, targetLang);
-      chunk.forEach((seg, j) => { seg.text = chunkResult[j]; });
-    }
+    // Traducir con Google Translate (sin clave): una petición por texto, con concurrencia limitada
+    let done = 0;
+    const texts = segRefs.map(s => s.text);
+    const translated = await googleTranslateBatch(texts, targetLang, () => {
+      done++;
+      setTranslateProgress(35 + (done / Math.max(1, texts.length)) * 45, `Traduciendo texto ${done} de ${texts.length}...`);
+    });
+    segRefs.forEach((seg, j) => { seg.text = translated[j]; });
 
     setTranslateProgress(85, 'Generando documento Word...');
     await loadDocxLib();
