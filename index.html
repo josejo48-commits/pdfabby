@@ -316,7 +316,7 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 let wordOpt = 'all';
 
 function openWordModal() {
-  if (!window.pdfDoc) { alert('Primero abre un PDF.'); return; }
+  if (!window.pdfLibDoc) { alert('Primero abre un PDF.'); return; }
   document.getElementById('word-modal').classList.add('show');
   document.getElementById('ovbg').classList.add('show');
   document.getElementById('wm-progress').style.display = 'none';
@@ -349,9 +349,9 @@ async function convertToWord() {
 
   try {
     // Determinar páginas a convertir
-    const totalPages = window.pdfDoc ? window.pdfDoc.numPages : 1;
-    const curPage = window.curPage || 1;
-    const pages = wordOpt === 'cur' ? [curPage] : Array.from({length: totalPages}, (_, i) => i + 1);
+    const totalPages = window.pageCount || 1;
+    const activePage = (window.curPage || 0) + 1;
+    const pages = wordOpt === 'cur' ? [activePage] : Array.from({length: totalPages}, (_, i) => i + 1);
 
     setWordProgress(5, 'Preparando páginas...');
 
@@ -362,7 +362,10 @@ async function convertToWord() {
       setWordProgress(10 + (i / pages.length) * 60, `Analizando página ${pgNum} de ${pages[pages.length-1]}...`);
 
       // Renderizar página a canvas
-      const page = await window.pdfDoc.getPage(pgNum);
+      // Renderizar usando pdfjsLib con los bytes de pdfLibDoc
+      const _bytes = await window.pdfLibDoc.save();
+      const _pjs = await pdfjsLib.getDocument({data: _bytes.slice()}).promise;
+      const page = await _pjs.getPage(pgNum);
       const viewport = page.getViewport({ scale: 1.5 });
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
@@ -472,7 +475,7 @@ async function convertToWord() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const fname = (window.pdfFileName || 'documento').replace(/\.pdf$/i, '');
+    const fname = 'documento_convertido';
     a.download = fname + '_convertido.docx';
     a.click();
     URL.revokeObjectURL(url);
