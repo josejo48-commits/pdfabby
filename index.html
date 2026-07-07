@@ -355,7 +355,7 @@ async function convertToWord() {
 
     setWordProgress(5, 'Preparando páginas...');
 
-    // Extraer texto de cada página: primero texto real del PDF, si no hay, OCR local
+    // Extraer texto de cada página: primero texto real del PDF (con formato/posición), si no hay, OCR local
     const allContent = [];
     for (let i = 0; i < pages.length; i++) {
       const pgNum = pages[i];
@@ -365,29 +365,58 @@ async function convertToWord() {
       const _pjs = await pdfjsLib.getDocument({data: _bytes.slice()}).promise;
       const page = await _pjs.getPage(pgNum);
 
-      // 1. Intentar extraer el texto real embebido en el PDF (rápido y exacto)
-      let parrafos = [];
+      // 1. Intentar extraer el texto real embebido en el PDF, con posición y estilo (rápido y exacto)
+      let lines = [];
       const textContent = await page.getTextContent();
       if (textContent.items && textContent.items.length > 0) {
-        const lines = [];
+        // Agrupar items en líneas por posición Y
+        const rawLines = [];
         let curLine = null;
         let lastY = null;
         const TOL = 3;
         textContent.items.forEach(it => {
+          if (!it.str) return;
           const y = it.transform[5];
+          const x = it.transform[4];
+          const size = Math.hypot(it.transform[2], it.transform[3]) || 10;
+          const style = (textContent.styles && textContent.styles[it.fontName]) || {};
+          const fam = ((style.fontFamily || '') + ' ' + (it.fontName || '')).toLowerCase();
+          const bold = /bold|black|heavy/.test(fam);
+          const italic = /italic|oblique/.test(fam);
+          const rec = { x, text: it.str, bold, italic, size, width: it.width || 0 };
           if (lastY === null || Math.abs(y - lastY) > TOL) {
-            curLine = { y, text: it.str };
-            lines.push(curLine);
+            curLine = { y, items: [rec] };
+            rawLines.push(curLine);
           } else {
-            curLine.text += it.str;
+            curLine.items.push(rec);
           }
           lastY = y;
         });
-        parrafos = lines.map(l => l.text.trim()).filter(t => t.length > 0);
+
+        // Dentro de cada línea: agrupar en "segmentos" (columnas) según huecos grandes en X
+        lines = rawLines.map(line => {
+          const its = line.items.slice().sort((a, b) => a.x - b.x);
+          const segments = [];
+          let cur = null;
+          let lastEndX = null;
+          its.forEach(it => {
+            const gap = lastEndX === null ? 0 : (it.x - lastEndX);
+            const gapThreshold = Math.max(it.size * 1.4, 10);
+            if (cur === null || gap > gapThreshold) {
+              cur = { x: it.x, text: it.text, bold: it.bold, italic: it.italic, size: it.size };
+              segments.push(cur);
+            } else {
+              cur.text += it.text;
+              cur.bold = cur.bold || it.bold;
+            }
+            lastEndX = it.x + it.width;
+          });
+          return { x0: its[0] ? its[0].x : 0, segments: segments.filter(s => s.text.trim().length > 0) };
+        }).filter(l => l.segments.length > 0);
       }
 
       // 2. Si la página no tiene texto (es escaneada / imagen), usar OCR local con Tesseract
-      if (parrafos.length === 0) {
+      if (lines.length === 0) {
         setWordProgress(10 + (i / pages.length) * 65, `Página ${pgNum} sin texto, aplicando OCR...`);
         const viewport = page.getViewport({ scale: 2 });
         const canvas = document.createElement('canvas');
@@ -396,18 +425,19 @@ async function convertToWord() {
         const ctx = canvas.getContext('2d');
         await page.render({ canvasContext: ctx, viewport }).promise;
         const { data: { text } } = await Tesseract.recognize(canvas, 'spa+eng');
-        parrafos = text.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+        lines = text.split('\n').map(t => t.trim()).filter(t => t.length > 0)
+          .map(t => ({ x0: 0, segments: [{ x: 0, text: t, bold: false, italic: false, size: 11 }] }));
       }
 
-      allContent.push({ page: pgNum, parrafos });
+      allContent.push({ page: pgNum, lines });
     }
 
     setWordProgress(80, 'Generando documento Word...');
 
-    // Construir DOCX con docx-js desde CDN
+    // Construir DOCX con docx-js (local)
     await loadDocxLib();
 
-    const { Document, Paragraph, TextRun, Packer } = window.docx;
+    const { Document, Paragraph, TextRun, Tab, TabStopType, Packer } = window.docx;
 
     const children = [];
 
@@ -420,11 +450,31 @@ async function convertToWord() {
         }));
       }
 
-      // Párrafos
-      for (const p of pg.parrafos) {
+      for (const line of pg.lines) {
+        const runChildren = [];
+        const tabStops = [];
+
+        line.segments.forEach((seg, idx) => {
+          if (idx > 0) {
+            runChildren.push(new TextRun({ children: [new Tab()] }));
+            tabStops.push({ type: TabStopType.LEFT, position: Math.max(0, Math.round(seg.x * 20)) });
+          }
+          runChildren.push(new TextRun({
+            text: seg.text,
+            bold: seg.bold,
+            italics: seg.italic,
+            size: Math.max(16, Math.round(seg.size * 2))
+          }));
+        });
+
+        // Indentación aproximada según la posición horizontal del inicio de línea
+        const indentTwips = Math.max(0, Math.round((line.x0 || 0) * 20));
+
         children.push(new Paragraph({
-          children: [new TextRun({ text: p, size: 22 })],
-          spacing: { before: 60, after: 60 }
+          children: runChildren,
+          tabStops: tabStops,
+          indent: indentTwips > 0 ? { left: Math.min(indentTwips, 2000) } : undefined,
+          spacing: { before: 40, after: 40 }
         }));
       }
     }
