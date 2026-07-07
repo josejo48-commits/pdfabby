@@ -125,6 +125,20 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 #word-modal.show{display:block}
 #word-modal h3{font-size:15px;font-weight:900;color:#0369a1;margin-bottom:6px}
 #word-modal p{font-size:12px;color:#64748b;margin-bottom:16px;line-height:1.5}
+.simple-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);padding:24px;width:380px;z-index:500;display:none}
+.simple-modal.show{display:block}
+.simple-modal h3{font-size:15px;font-weight:900;margin-bottom:6px}
+.simple-modal p{font-size:12px;color:#64748b;margin-bottom:14px;line-height:1.5}
+#merge-modal{border:2px solid #bbf7d0}
+#merge-modal h3{color:#15803d}
+#merge-modal .wm-ok{background:linear-gradient(135deg,#22c55e,#16a34a)!important}
+.merge-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;background:#f0fdf4;border:1.5px solid #bbf7d0;font-size:12px;font-weight:700;color:#166534}
+.merge-item .mi-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.merge-item button{border:none;background:transparent;cursor:pointer;font-size:14px;color:#166534;padding:2px 5px}
+.merge-item button:disabled{opacity:.25;cursor:default}
+#compress-modal{border:2px solid #fecaca}
+#compress-modal h3{color:#b91c1c}
+#compress-modal .wm-ok{background:linear-gradient(135deg,#ef4444,#b91c1c)!important}
 .wm-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
 .wm-opt{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;border:1.5px solid #e0e7ff;background:#fafafe;cursor:pointer;transition:.15s}
 .wm-opt:hover{border-color:#7dd3fc;background:#f0f9ff}
@@ -181,6 +195,13 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
     <div class="tgrp-label">Convertir</div>
     <div class="tgrp-inner">
       <button class="tbtn" id="t-toword" onclick="openWordModal()" style="background:#f0f9ff;color:#0369a1;border-color:#bae6fd"><span class="ico">&#128196;</span>PDF a Word</button>
+    </div>
+  </div>
+  <div class="tgrp">
+    <div class="tgrp-label">Archivo</div>
+    <div class="tgrp-inner">
+      <button class="tbtn" id="t-merge" onclick="openMergeModal()" style="background:#f0fdf4;color:#15803d;border-color:#bbf7d0"><span class="ico">&#128279;</span>Unir PDFs</button>
+      <button class="tbtn" id="t-compress" onclick="openCompressModal()" style="background:#fef2f2;color:#b91c1c;border-color:#fecaca"><span class="ico">&#128230;</span>Comprimir</button>
     </div>
   </div>
   <div class="tgrp">
@@ -309,6 +330,54 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
   <div class="wm-acts">
     <button class="wm-cancel" onclick="closeWordModal()">Cancelar</button>
     <button class="wm-ok" id="wm-go" onclick="convertToWord()">&#128196; Convertir a Word</button>
+  </div>
+</div>
+<div id="merge-modal" class="simple-modal">
+  <h3>&#128279; Unir PDFs</h3>
+  <p>Agrega los PDFs en el orden en que quieres unirlos. El PDF que tienes abierto se incluye automáticamente al inicio.</p>
+  <button class="upload-btn" style="width:100%;margin-bottom:12px" onclick="document.getElementById('merge-file-input').click()">+ Agregar PDFs</button>
+  <input type="file" id="merge-file-input" accept=".pdf" multiple style="display:none" onchange="addMergeFiles(this)">
+  <div id="merge-list" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
+  <div class="wm-progress" id="merge-progress" style="display:none">
+    <div class="wm-status" id="merge-status">Uniendo...</div>
+    <div class="wm-progress-bar"><div class="wm-progress-fill" id="merge-fill"></div></div>
+  </div>
+  <div class="wm-acts">
+    <button class="wm-cancel" onclick="closeMergeModal()">Cancelar</button>
+    <button class="wm-ok" id="merge-go" onclick="doMerge()">&#128279; Unir PDFs</button>
+  </div>
+</div>
+<div id="compress-modal" class="simple-modal">
+  <h3>&#128230; Comprimir PDF</h3>
+  <p>Reduce el tamaño del archivo actual.</p>
+  <div class="wm-opts" id="compress-opts">
+    <div class="wm-opt sel" id="cmp-opt-light" onclick="selCompressMode('light')">
+      <div class="wm-opt-ico">&#128221;</div>
+      <div class="wm-opt-info">
+        <div class="wm-opt-title">Ligera</div>
+        <div class="wm-opt-desc">Mantiene el texto editable, reduce poco</div>
+      </div>
+    </div>
+    <div class="wm-opt" id="cmp-opt-strong" onclick="selCompressMode('strong')">
+      <div class="wm-opt-ico">&#128999;</div>
+      <div class="wm-opt-info">
+        <div class="wm-opt-title">Fuerte (imagen)</div>
+        <div class="wm-opt-desc">Reduce mucho más; el texto deja de ser seleccionable</div>
+      </div>
+    </div>
+  </div>
+  <div id="compress-quality-row" style="display:none;margin-top:8px">
+    <div class="ol">Calidad de imagen</div>
+    <input type="range" id="cmp-quality" min="30" max="90" value="60" style="width:100%">
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:#94a3b8"><span>Menor tamaño</span><span>Mejor calidad</span></div>
+  </div>
+  <div class="wm-progress" id="compress-progress" style="display:none;margin-top:10px">
+    <div class="wm-status" id="compress-status">Comprimiendo...</div>
+    <div class="wm-progress-bar"><div class="wm-progress-fill" id="compress-fill"></div></div>
+  </div>
+  <div class="wm-acts" style="margin-top:14px">
+    <button class="wm-cancel" onclick="closeCompressModal()">Cancelar</button>
+    <button class="wm-ok" id="compress-go" onclick="doCompress()">&#128230; Comprimir</button>
   </div>
 </div>
 <div id="loading"><div class="spin"></div><div id="ltxt">Procesando...</div></div>
@@ -782,6 +851,218 @@ async function loadDocxLib() {
 // Parchar closeTextEdit para incluir modal de Word
 const _origClose = window.closeTextEdit;
 document.getElementById('ovbg').addEventListener('click', closeWordModal, false);
+document.getElementById('ovbg').addEventListener('click', closeMergeModal, false);
+document.getElementById('ovbg').addEventListener('click', closeCompressModal, false);
+
+// ── Unir PDFs ────────────────────────────────────────────────────────────
+let mergeFiles = [];
+
+function openMergeModal() {
+  if (!pdfLibDoc) { alert('Primero abre un PDF.'); return; }
+  mergeFiles = [{ name: 'PDF actual (' + pageCount + ' pág.)', bytes: null, isCurrent: true }];
+  renderMergeList();
+  document.getElementById('merge-modal').classList.add('show');
+  document.getElementById('ovbg').classList.add('show');
+  document.getElementById('merge-progress').style.display = 'none';
+  const btn = document.getElementById('merge-go');
+  btn.disabled = false;
+  btn.textContent = '🔗 Unir PDFs';
+}
+
+function closeMergeModal() {
+  document.getElementById('merge-modal').classList.remove('show');
+  document.getElementById('ovbg').classList.remove('show');
+}
+
+async function addMergeFiles(input) {
+  const files = Array.from(input.files || []);
+  for (const f of files) {
+    const ab = await f.arrayBuffer();
+    mergeFiles.push({ name: f.name, bytes: new Uint8Array(ab), isCurrent: false });
+  }
+  input.value = '';
+  renderMergeList();
+}
+
+function removeMergeItem(idx) {
+  mergeFiles.splice(idx, 1);
+  renderMergeList();
+}
+
+function moveMergeItem(idx, dir) {
+  const j = idx + dir;
+  if (j < 0 || j >= mergeFiles.length) return;
+  const tmp = mergeFiles[idx];
+  mergeFiles[idx] = mergeFiles[j];
+  mergeFiles[j] = tmp;
+  renderMergeList();
+}
+
+function renderMergeList() {
+  const list = document.getElementById('merge-list');
+  list.innerHTML = '';
+  mergeFiles.forEach((item, idx) => {
+    const row = document.createElement('div');
+    row.className = 'merge-item';
+    row.innerHTML = `
+      <span>${idx + 1}.</span>
+      <span class="mi-name">${item.name}</span>
+      <button onclick="moveMergeItem(${idx},-1)" ${idx === 0 ? 'disabled' : ''} title="Subir">↑</button>
+      <button onclick="moveMergeItem(${idx},1)" ${idx === mergeFiles.length - 1 ? 'disabled' : ''} title="Bajar">↓</button>
+      <button onclick="removeMergeItem(${idx})" title="Quitar">✕</button>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function setMergeProgress(pct, msg) {
+  document.getElementById('merge-fill').style.width = pct + '%';
+  document.getElementById('merge-status').textContent = msg;
+}
+
+async function doMerge() {
+  if (mergeFiles.length < 2) { alert('Agrega al menos un PDF más para unir.'); return; }
+  const btn = document.getElementById('merge-go');
+  btn.disabled = true;
+  btn.textContent = 'Uniendo...';
+  const prog = document.getElementById('merge-progress');
+  prog.style.display = 'block';
+
+  try {
+    const merged = await PDFLib.PDFDocument.create();
+    for (let i = 0; i < mergeFiles.length; i++) {
+      const item = mergeFiles[i];
+      setMergeProgress(10 + (i / mergeFiles.length) * 75, `Agregando ${item.name}...`);
+      const bytes = item.isCurrent ? await pdfLibDoc.save() : item.bytes;
+      const src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+      const copiedPages = await merged.copyPages(src, src.getPageIndices());
+      copiedPages.forEach(p => merged.addPage(p));
+    }
+
+    setMergeProgress(90, 'Empaquetando...');
+    const mergedBytes = await merged.save();
+
+    await reloadDoc(mergedBytes);
+    curPage = 0;
+    history = [];
+    if (typeof allText !== 'undefined') { allText = []; allTextLoaded = false; }
+    updateUndoBtn();
+    await renderAll();
+    $('dlbtn').disabled = false;
+    $('spages').textContent = pageCount + ' página' + (pageCount > 1 ? 's' : '');
+    $('pginfo').textContent = pageCount + ' pág.';
+    setMsg('PDFs unidos ✓');
+
+    setMergeProgress(100, '✅ ¡PDFs unidos!');
+    setTimeout(() => closeMergeModal(), 1500);
+  } catch (e) {
+    console.error(e);
+    const msg = (e && e.message) ? e.message : String(e);
+    document.getElementById('merge-status').textContent = '❌ Error: ' + msg;
+    btn.disabled = false;
+    btn.textContent = '🔗 Unir PDFs';
+  }
+}
+
+// ── Comprimir PDF ────────────────────────────────────────────────────────
+let compressMode = 'light';
+
+function openCompressModal() {
+  if (!pdfLibDoc) { alert('Primero abre un PDF.'); return; }
+  document.getElementById('compress-modal').classList.add('show');
+  document.getElementById('ovbg').classList.add('show');
+  document.getElementById('compress-progress').style.display = 'none';
+  const btn = document.getElementById('compress-go');
+  btn.disabled = false;
+  btn.textContent = '📦 Comprimir';
+}
+
+function closeCompressModal() {
+  document.getElementById('compress-modal').classList.remove('show');
+  document.getElementById('ovbg').classList.remove('show');
+}
+
+function selCompressMode(mode) {
+  compressMode = mode;
+  document.querySelectorAll('#compress-opts .wm-opt').forEach(el => el.classList.remove('sel'));
+  document.getElementById(mode === 'light' ? 'cmp-opt-light' : 'cmp-opt-strong').classList.add('sel');
+  document.getElementById('compress-quality-row').style.display = (mode === 'strong') ? 'block' : 'none';
+}
+
+function setCompressProgress(pct, msg) {
+  document.getElementById('compress-fill').style.width = pct + '%';
+  document.getElementById('compress-status').textContent = msg;
+}
+
+function dataURLToBytesGeneric(dataURL) {
+  const b64 = dataURL.split(',')[1];
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k);
+  return arr;
+}
+
+async function doCompress() {
+  const btn = document.getElementById('compress-go');
+  btn.disabled = true;
+  btn.textContent = 'Comprimiendo...';
+  const prog = document.getElementById('compress-progress');
+  prog.style.display = 'block';
+
+  try {
+    const originalBytes = await pdfLibDoc.save();
+    const originalSize = originalBytes.length;
+    let resultBytes;
+
+    if (compressMode === 'light') {
+      setCompressProgress(40, 'Optimizando estructura del PDF...');
+      resultBytes = await pdfLibDoc.save({ useObjectStreams: true });
+    } else {
+      const quality = Math.max(0.3, Math.min(0.9, parseInt(document.getElementById('cmp-quality').value, 10) / 100));
+      const _pjs = await pdfjsLib.getDocument({ data: originalBytes.slice() }).promise;
+      const newDoc = await PDFLib.PDFDocument.create();
+      for (let i = 1; i <= pageCount; i++) {
+        setCompressProgress(10 + (i / pageCount) * 70, `Comprimiendo página ${i} de ${pageCount}...`);
+        const page = await _pjs.getPage(i);
+        const renderViewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = renderViewport.width;
+        canvas.height = renderViewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+        const jpegBytes = dataURLToBytesGeneric(canvas.toDataURL('image/jpeg', quality));
+        const jpgImage = await newDoc.embedJpg(jpegBytes);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const newPage = newDoc.addPage([baseViewport.width, baseViewport.height]);
+        newPage.drawImage(jpgImage, { x: 0, y: 0, width: baseViewport.width, height: baseViewport.height });
+      }
+      setCompressProgress(85, 'Empaquetando...');
+      resultBytes = await newDoc.save();
+    }
+
+    const newSize = resultBytes.length;
+    setCompressProgress(95, 'Guardando...');
+
+    await reloadDoc(resultBytes);
+    curPage = 0;
+    history = [];
+    if (typeof allText !== 'undefined') { allText = []; allTextLoaded = false; }
+    updateUndoBtn();
+    await renderAll();
+    $('dlbtn').disabled = false;
+
+    const pct = Math.max(0, Math.round((1 - newSize / originalSize) * 100));
+    setCompressProgress(100, `✅ Listo: ${(originalSize / 1024).toFixed(0)}KB → ${(newSize / 1024).toFixed(0)}KB (-${pct}%)`);
+    setMsg('PDF comprimido ✓');
+    setTimeout(() => closeCompressModal(), 2200);
+  } catch (e) {
+    console.error(e);
+    const msg = (e && e.message) ? e.message : String(e);
+    document.getElementById('compress-status').textContent = '❌ Error: ' + msg;
+    btn.disabled = false;
+    btn.textContent = '📦 Comprimir';
+  }
+}
 </script>
 </body>
 </html>
