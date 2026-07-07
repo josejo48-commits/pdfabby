@@ -264,7 +264,7 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 </div>
 <div id="word-modal">
   <h3>&#128196; Convertir PDF a Word</h3>
-  <p>La IA leerá el contenido del PDF y generará un documento Word (.docx) editable con el texto y estructura preservados.</p>
+  <p>Se leerá el texto del PDF (o se aplicará OCR si es una página escaneada) y se generará un documento Word (.docx) editable.</p>
   <div class="wm-opts">
     <div class="wm-opt sel" id="wm-opt-all" onclick="selWordOpt('all')">
       <div class="wm-opt-ico">&#128196;</div>
@@ -355,62 +355,59 @@ async function convertToWord() {
 
     setWordProgress(5, 'Preparando páginas...');
 
-    // Extraer texto + imagen de cada página con Claude
+    // Extraer texto de cada página: primero texto real del PDF, si no hay, OCR local
     const allContent = [];
     for (let i = 0; i < pages.length; i++) {
       const pgNum = pages[i];
-      setWordProgress(10 + (i / pages.length) * 60, `Analizando página ${pgNum} de ${pages[pages.length-1]}...`);
+      setWordProgress(10 + (i / pages.length) * 65, `Leyendo página ${pgNum} de ${pages[pages.length-1]}...`);
 
-      // Renderizar página a canvas
-      // Renderizar usando pdfjsLib con los bytes de pdfLibDoc
       const _bytes = await window.pdfLibDoc.save();
       const _pjs = await pdfjsLib.getDocument({data: _bytes.slice()}).promise;
       const page = await _pjs.getPage(pgNum);
-      const viewport = page.getViewport({ scale: 1.5 });
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const ctx = canvas.getContext('2d');
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      const imgData = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
 
-      // Llamar a Claude API
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1000,
-          system: 'Eres un experto en extracción de texto de documentos. Analiza la imagen del PDF y extrae TODO el contenido textual de forma estructurada. Responde SOLO con JSON sin texto adicional, sin markdown. Formato: {"titulo":"título del documento si existe o vacío","parrafos":["párrafo1","párrafo2",...],"tablas":[{"headers":["col1","col2"],"filas":[["val1","val2"]]}]}. Preserva la estructura lógica, separa párrafos correctamente, incluye texto de tablas.',
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imgData } },
-              { type: 'text', text: `Extrae todo el contenido textual de esta página ${pgNum} del PDF. Devuelve JSON estructurado.` }
-            ]
-          }]
-        })
-      });
-
-      const data = await resp.json();
-      let content = { titulo: '', parrafos: [], tablas: [] };
-      try {
-        const raw = (data.content?.[0]?.text || '{}').replace(/```json|```/g, '').trim();
-        content = JSON.parse(raw);
-      } catch(e) {
-        // Fallback: texto plano
-        const txt = data.content?.[0]?.text || '';
-        content.parrafos = txt.split('\n').filter(l => l.trim());
+      // 1. Intentar extraer el texto real embebido en el PDF (rápido y exacto)
+      let parrafos = [];
+      const textContent = await page.getTextContent();
+      if (textContent.items && textContent.items.length > 0) {
+        const lines = [];
+        let curLine = null;
+        let lastY = null;
+        const TOL = 3;
+        textContent.items.forEach(it => {
+          const y = it.transform[5];
+          if (lastY === null || Math.abs(y - lastY) > TOL) {
+            curLine = { y, text: it.str };
+            lines.push(curLine);
+          } else {
+            curLine.text += it.str;
+          }
+          lastY = y;
+        });
+        parrafos = lines.map(l => l.text.trim()).filter(t => t.length > 0);
       }
-      allContent.push({ page: pgNum, ...content });
+
+      // 2. Si la página no tiene texto (es escaneada / imagen), usar OCR local con Tesseract
+      if (parrafos.length === 0) {
+        setWordProgress(10 + (i / pages.length) * 65, `Página ${pgNum} sin texto, aplicando OCR...`);
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const { data: { text } } = await Tesseract.recognize(canvas, 'spa+eng');
+        parrafos = text.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+      }
+
+      allContent.push({ page: pgNum, parrafos });
     }
 
-    setWordProgress(75, 'Generando documento Word...');
+    setWordProgress(80, 'Generando documento Word...');
 
     // Construir DOCX con docx-js desde CDN
     await loadDocxLib();
 
-    const { Document, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, Packer } = window.docx;
+    const { Document, Paragraph, TextRun, Packer } = window.docx;
 
     const children = [];
 
@@ -423,49 +420,16 @@ async function convertToWord() {
         }));
       }
 
-      // Título del documento (primera página)
-      if (pg.titulo && pg.titulo.trim()) {
-        children.push(new Paragraph({
-          text: pg.titulo,
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 100, after: 200 }
-        }));
-      }
-
       // Párrafos
-      for (const p of (pg.parrafos || [])) {
-        if (!p.trim()) continue;
+      for (const p of pg.parrafos) {
         children.push(new Paragraph({
           children: [new TextRun({ text: p, size: 22 })],
           spacing: { before: 60, after: 60 }
         }));
       }
-
-      // Tablas
-      for (const tabla of (pg.tablas || [])) {
-        if (!tabla.headers?.length) continue;
-        const allRows = [tabla.headers, ...(tabla.filas || [])];
-        const tableRows = allRows.map((row, ri) =>
-          new TableRow({
-            children: row.map(cell =>
-              new TableCell({
-                children: [new Paragraph({
-                  children: [new TextRun({ text: String(cell || ''), bold: ri === 0, size: 20 })]
-                })],
-                width: { size: Math.floor(9000 / row.length), type: WidthType.DXA }
-              })
-            )
-          })
-        );
-        children.push(new Table({
-          rows: tableRows,
-          width: { size: 9000, type: WidthType.DXA }
-        }));
-        children.push(new Paragraph({ text: '', spacing: { after: 100 } }));
-      }
     }
 
-    setWordProgress(90, 'Empaquetando archivo...');
+    setWordProgress(92, 'Empaquetando archivo...');
 
     const doc = new Document({
       sections: [{ properties: {}, children }]
