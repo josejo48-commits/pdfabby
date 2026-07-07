@@ -350,27 +350,63 @@ textarea{min-height:60px;resize:vertical;font-family:inherit;font-weight:600}
 <div id="compress-modal" class="simple-modal">
   <h3>&#128230; Comprimir PDF</h3>
   <p>Reduce el tamaño del archivo actual.</p>
-  <div class="wm-opts" id="compress-opts">
-    <div class="wm-opt sel" id="cmp-opt-light" onclick="selCompressMode('light')">
-      <div class="wm-opt-ico">&#128221;</div>
+  <div class="wm-opts" id="compress-engine-opts">
+    <div class="wm-opt sel" id="cmp-eng-local" onclick="selCompressEngine('local')">
+      <div class="wm-opt-ico">&#128241;</div>
       <div class="wm-opt-info">
-        <div class="wm-opt-title">Ligera</div>
-        <div class="wm-opt-desc">Mantiene el texto editable, reduce poco</div>
+        <div class="wm-opt-title">Local (sin internet)</div>
+        <div class="wm-opt-desc">Rápido, funciona bien con fotos grandes</div>
       </div>
     </div>
-    <div class="wm-opt" id="cmp-opt-strong" onclick="selCompressMode('strong')">
-      <div class="wm-opt-ico">&#128999;</div>
+    <div class="wm-opt" id="cmp-eng-cc" onclick="selCompressEngine('cc')">
+      <div class="wm-opt-ico">&#9729;</div>
       <div class="wm-opt-info">
-        <div class="wm-opt-title">Fuerte (imagen)</div>
-        <div class="wm-opt-desc">Reduce mucho más; el texto deja de ser seleccionable</div>
+        <div class="wm-opt-title">CloudConvert</div>
+        <div class="wm-opt-desc">Necesita internet, mejor para PDFs escaneados</div>
       </div>
     </div>
   </div>
-  <div id="compress-quality-row" style="display:none;margin-top:8px">
-    <div class="ol">Calidad de imagen</div>
-    <input type="range" id="cmp-quality" min="30" max="90" value="60" style="width:100%">
-    <div style="display:flex;justify-content:space-between;font-size:10px;color:#94a3b8"><span>Menor tamaño</span><span>Mejor calidad</span></div>
+
+  <div id="compress-local-opts">
+    <div class="wm-opts" id="compress-opts" style="margin-top:8px">
+      <div class="wm-opt sel" id="cmp-opt-light" onclick="selCompressMode('light')">
+        <div class="wm-opt-ico">&#128221;</div>
+        <div class="wm-opt-info">
+          <div class="wm-opt-title">Ligera</div>
+          <div class="wm-opt-desc">Mantiene el texto editable, reduce poco</div>
+        </div>
+      </div>
+      <div class="wm-opt" id="cmp-opt-strong" onclick="selCompressMode('strong')">
+        <div class="wm-opt-ico">&#128999;</div>
+        <div class="wm-opt-info">
+          <div class="wm-opt-title">Fuerte (imagen)</div>
+          <div class="wm-opt-desc">Reduce mucho más; el texto deja de ser seleccionable</div>
+        </div>
+      </div>
+    </div>
+    <div id="compress-quality-row" style="display:none;margin-top:8px">
+      <div class="ol">Calidad de imagen</div>
+      <input type="range" id="cmp-quality" min="30" max="90" value="60" style="width:100%">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#94a3b8"><span>Menor tamaño</span><span>Mejor calidad</span></div>
+    </div>
   </div>
+
+  <div id="compress-cc-opts" style="display:none">
+    <div class="ol" style="margin-top:6px">Perfil de compresión</div>
+    <select id="cc-profile" style="width:100%;padding:8px;border-radius:8px;border:1.5px solid #e0e7ff;font-size:12px;font-weight:700;margin-top:4px">
+      <option value="mrc" selected>Documento escaneado (recomendado)</option>
+      <option value="max">Máxima reducción</option>
+      <option value="web">Web / estándar</option>
+      <option value="print">Impresión</option>
+      <option value="archive">Archivo / conservación</option>
+    </select>
+    <div id="cc-key-row-2" style="margin-top:8px">
+      <div class="ol">Clave de API de CloudConvert</div>
+      <input type="text" id="cc-api-key-2" placeholder="Pega tu API key aquí">
+      <div class="note" style="margin-top:6px">La misma clave que usas para "PDF a Word". Se guarda solo en este dispositivo.</div>
+    </div>
+  </div>
+
   <div class="wm-progress" id="compress-progress" style="display:none;margin-top:10px">
     <div class="wm-status" id="compress-status">Comprimiendo...</div>
     <div class="wm-progress-bar"><div class="wm-progress-fill" id="compress-fill"></div></div>
@@ -966,6 +1002,7 @@ async function doMerge() {
 
 // ── Comprimir PDF ────────────────────────────────────────────────────────
 let compressMode = 'light';
+let compressEngine = 'local';
 
 function openCompressModal() {
   if (!pdfLibDoc) { alert('Primero abre un PDF.'); return; }
@@ -975,11 +1012,21 @@ function openCompressModal() {
   const btn = document.getElementById('compress-go');
   btn.disabled = false;
   btn.textContent = '📦 Comprimir';
+  const savedKey = localStorage.getItem('cc_api_key');
+  if (savedKey) document.getElementById('cc-api-key-2').value = savedKey;
 }
 
 function closeCompressModal() {
   document.getElementById('compress-modal').classList.remove('show');
   document.getElementById('ovbg').classList.remove('show');
+}
+
+function selCompressEngine(eng) {
+  compressEngine = eng;
+  document.querySelectorAll('#compress-engine-opts .wm-opt').forEach(el => el.classList.remove('sel'));
+  document.getElementById(eng === 'local' ? 'cmp-eng-local' : 'cmp-eng-cc').classList.add('sel');
+  document.getElementById('compress-local-opts').style.display = (eng === 'local') ? 'block' : 'none';
+  document.getElementById('compress-cc-opts').style.display = (eng === 'cc') ? 'block' : 'none';
 }
 
 function selCompressMode(mode) {
@@ -1003,6 +1050,101 @@ function dataURLToBytesGeneric(dataURL) {
 }
 
 async function doCompress() {
+  if (compressEngine === 'cc') return doCompressCloudConvert();
+  return doCompressLocal();
+}
+
+async function doCompressCloudConvert() {
+  const btn = document.getElementById('compress-go');
+  const apiKey = document.getElementById('cc-api-key-2').value.trim();
+  if (!apiKey) { alert('Pega tu API key de CloudConvert primero.'); return; }
+  localStorage.setItem('cc_api_key', apiKey);
+  const profile = document.getElementById('cc-profile').value;
+
+  btn.disabled = true;
+  btn.textContent = 'Comprimiendo...';
+  const prog = document.getElementById('compress-progress');
+  prog.style.display = 'block';
+
+  try {
+    const originalBytes = await pdfLibDoc.save();
+    const originalSize = originalBytes.length;
+
+    setCompressProgress(10, 'Creando trabajo en CloudConvert...');
+    const jobResp = await fetch('https://api.cloudconvert.com/v2/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({
+        tasks: {
+          'upload-my-file': { operation: 'import/upload' },
+          'optimize-my-file': { operation: 'optimize', input: 'upload-my-file', input_format: 'pdf', profile: profile },
+          'export-my-file': { operation: 'export/url', input: 'optimize-my-file' }
+        }
+      })
+    });
+    if (!jobResp.ok) {
+      const errBody = await jobResp.json().catch(() => ({}));
+      throw new Error('CloudConvert: ' + (errBody.message || jobResp.status));
+    }
+    const job = await jobResp.json();
+    const uploadTask = job.data.tasks.find(t => t.name === 'upload-my-file');
+    if (!uploadTask || !uploadTask.result || !uploadTask.result.form) throw new Error('No se pudo iniciar la subida a CloudConvert.');
+
+    setCompressProgress(30, 'Subiendo PDF...');
+    const form = uploadTask.result.form;
+    const fd = new FormData();
+    Object.entries(form.parameters).forEach(([k, v]) => fd.append(k, v));
+    fd.append('file', new Blob([originalBytes], { type: 'application/pdf' }), 'documento.pdf');
+    const uploadResp = await fetch(form.url, { method: 'POST', body: fd });
+    if (!uploadResp.ok) throw new Error('Falló la subida del archivo a CloudConvert.');
+
+    setCompressProgress(55, 'Comprimiendo en CloudConvert...');
+    const waitResp = await fetch('https://sync.api.cloudconvert.com/v2/jobs/' + job.data.id, {
+      headers: { 'Authorization': 'Bearer ' + apiKey }
+    });
+    if (!waitResp.ok) throw new Error('Error esperando la compresión.');
+    const finishedJob = await waitResp.json();
+    const exportTask = finishedJob.data.tasks.find(t => t.name === 'export-my-file');
+    if (!exportTask || exportTask.status !== 'finished' || !exportTask.result || !exportTask.result.files || !exportTask.result.files[0]) {
+      const failedTask = finishedJob.data.tasks.find(t => t.status === 'error');
+      throw new Error(failedTask ? failedTask.message : 'La compresión no terminó correctamente.');
+    }
+
+    setCompressProgress(85, 'Descargando resultado...');
+    const fileUrl = exportTask.result.files[0].url;
+    const fileResp = await fetch(fileUrl);
+    const newBytes = new Uint8Array(await fileResp.arrayBuffer());
+    let newSize = newBytes.length;
+    let finalBytes = newBytes;
+    let keptOriginal = false;
+    if (newSize >= originalSize) { finalBytes = originalBytes; newSize = originalSize; keptOriginal = true; }
+
+    setCompressProgress(95, 'Guardando...');
+    await reloadDoc(finalBytes);
+    curPage = 0;
+    history = [];
+    if (typeof allText !== 'undefined') { allText = []; allTextLoaded = false; }
+    updateUndoBtn();
+    await renderAll();
+    $('dlbtn').disabled = false;
+
+    const pct = Math.round((1 - newSize / originalSize) * 100);
+    const finalMsg = keptOriginal
+      ? `ℹ️ Este PDF ya está bien optimizado (${(originalSize / 1024).toFixed(0)}KB) — no se pudo reducir más.`
+      : `✅ Listo: ${(originalSize / 1024).toFixed(0)}KB → ${(newSize / 1024).toFixed(0)}KB (-${pct}%)`;
+    setCompressProgress(100, finalMsg);
+    setMsg('PDF comprimido ✓');
+    setTimeout(() => closeCompressModal(), 2600);
+  } catch (e) {
+    console.error(e);
+    const msg = (e && e.message) ? e.message : String(e);
+    document.getElementById('compress-status').textContent = '❌ Error: ' + msg;
+    btn.disabled = false;
+    btn.textContent = '📦 Comprimir';
+  }
+}
+
+async function doCompressLocal() {
   const btn = document.getElementById('compress-go');
   btn.disabled = true;
   btn.textContent = 'Comprimiendo...';
